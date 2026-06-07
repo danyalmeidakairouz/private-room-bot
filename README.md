@@ -205,6 +205,39 @@ To change these, edit the values in `src/constants.ts` before building.
 
 ---
 
+## Hosting / Deployment
+
+The bot is a persistent process (a long-lived Discord gateway connection), so it
+needs an **always-on** host with **persistent disk** — not a serverless platform.
+For a free Google Cloud `e2-micro` VM, see [`deploy/DEPLOY-GCP.md`](deploy/DEPLOY-GCP.md)
+(uses the systemd unit in [`deploy/private-room-bot.service`](deploy/private-room-bot.service)).
+
+### Docker
+
+A multi-stage [`Dockerfile`](Dockerfile) is included (runs as a non-root user,
+production dependencies only). Build and run:
+
+```bash
+docker build -t private-room-bot .
+
+# Register the /setup slash command once (one-off container):
+docker run --rm --env-file .env private-room-bot node dist/deploy-commands.js
+
+# Run the bot, persisting state to a named volume so /setup config and active
+# rooms survive restarts:
+docker run -d --name private-room-bot --restart unless-stopped \
+  --env-file .env \
+  -v private-room-bot-data:/app/data \
+  private-room-bot
+```
+
+Pass secrets via `--env-file .env` (or `-e DISCORD_TOKEN=… -e CLIENT_ID=…`).
+The bot makes only outbound connections, so no ports need publishing. This
+image also works on container hosts like Fly.io or Railway — mount a
+persistent volume at `/app/data`.
+
+---
+
 ## Troubleshooting
 
 ### The bot cannot create or delete roles
