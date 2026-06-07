@@ -2,13 +2,16 @@ import { Events, MessageFlags, type Client } from 'discord.js';
 import * as setup from '../commands/setup';
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { RoomManager } from '../services/roomManager';
-import { BUTTON_IDS } from '../constants';
+import { BUTTON_IDS, SELECT_IDS } from '../constants';
 
 const ROOM_BUTTON_PREFIXES: readonly string[] = [
+  BUTTON_IDS.knock,
   BUTTON_IDS.request,
   BUTTON_IDS.approve,
   BUTTON_IDS.deny,
 ];
+
+const ROOM_SELECT_PREFIXES: readonly string[] = [SELECT_IDS.pick];
 
 export function registerInteractionCreate(
   client: Client,
@@ -17,11 +20,20 @@ export function registerInteractionCreate(
 ): void {
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      // Private-room knock/approval buttons.
+      // Knock/approval buttons.
       if (interaction.isButton()) {
         const prefix = interaction.customId.split(':')[0];
         if (ROOM_BUTTON_PREFIXES.includes(prefix)) {
           await roomManager.handleButton(interaction);
+        }
+        return;
+      }
+
+      // Room-picker select menu (shown after the knock button is pressed).
+      if (interaction.isStringSelectMenu()) {
+        const prefix = interaction.customId.split(':')[0];
+        if (ROOM_SELECT_PREFIXES.includes(prefix)) {
+          await roomManager.handleSelectMenu(interaction);
         }
         return;
       }

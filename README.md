@@ -3,7 +3,7 @@
 A discord.js v14 bot that turns two "Join to Create" lobby voice channels into temporary **public** and **private** voice rooms. `/setup` creates a **🔊 Join for Public** and a **🔒 Join for Private** lobby under one category. Joining either lobby spins up a freshly-named room and moves the creator in; when everyone leaves, the room (and, for private rooms, its temporary role) is deleted automatically.
 
 - **Public rooms** — no role, no gate: anyone can see and join. Deleted as soon as the last person leaves.
-- **Private rooms** — role-gated. Everyone can **see** the room but only members can **join**. Outsiders press a **Request to Join** button in the room's chat to knock; any member currently in the room can approve, which grants the role and lets them in.
+- **Private rooms** — role-gated. Everyone can **see** the room but only members can **join**. Outsiders knock from the **🚪 request-to-join** panel channel (press the button, pick the room); any member currently in the room can approve, which grants the role and lets them in.
 
 ---
 
@@ -11,7 +11,7 @@ A discord.js v14 bot that turns two "Join to Create" lobby voice channels into t
 
 - **One-command setup** — `/setup` creates both lobby channels (public + private) under one category and stores your guild configuration.
 - **Public & private rooms** — a **🔊 Join for Public** lobby (open to all) and a **🔒 Join for Private** lobby (role-gated).
-- **Knock-to-join approval** — outsiders can see a private room and press **Request to Join**; the bot posts the request in the room's chat and any member inside can **Approve**/**Deny** with a button. Approval grants the role and pulls them in.
+- **Knock-to-join panel** — a **🚪 request-to-join** text channel everyone can see holds a button; pressing it opens a private dropdown of active private rooms. Picking one posts an **Approve**/**Deny** request into that room's chat, where any member inside can grant access.
 - **Auto-generated room names** — random `Adjective-Noun-XXX` format (e.g. `Brave-Otter-7K2`).
 - **Per-room temporary role** (private only) — gates who can join; automatically cleaned up when the room empties. Public rooms use no role.
 - **Invite link generation** — 24-hour invite posted in the private room's chat and DMed to the creator.
@@ -71,7 +71,7 @@ Build an OAuth2 URL with the required scopes and permissions:
 
 Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 16777216 + 2048 = 286,264,337`
 
-**Send Messages** is required so the bot can post the invite message and the **Request to Join** / **Approve** / **Deny** buttons in each room's built-in text chat.
+**Send Messages** is required so the bot can post the knock panel in **🚪 request-to-join**, the invite message in each private room, and the **Approve** / **Deny** prompts.
 
 Use this invite URL template (replace `YOUR_CLIENT_ID`):
 
@@ -152,7 +152,9 @@ In your Discord server, run the `/setup` slash command. Optional parameters:
 | `admin_role` | Role to whitelist as room admin (private temp roles sit just below it) | None |
 | `category` | Name of the category to create the lobbies under | `Voice Rooms` |
 
-This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby channels under the specified (or new) category and stores your guild configuration.
+This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby channels, plus a **🚪 request-to-join** panel channel, under the specified (or new) category, and stores your guild configuration.
+
+> **Re-running `/setup`** is safe: it rebuilds the channels and the knock panel and automatically deletes the previous run's bot-created lobby/knock channels (the category is left alone in case it still holds active rooms).
 
 > **Upgrading from the single-lobby version?** Re-run `/setup` to create the second lobby and refresh the stored config. Until you do, the old lobby keeps working as the private lobby.
 
@@ -169,16 +171,17 @@ This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby ch
    - Creates a new voice channel where everyone can **see** the room but `@everyone` is denied **Connect**.
    - Creates a matching temporary role (placed just below the admin role) and assigns it to the creator.
    - Moves the member into the new channel.
-   - Posts a 24-hour invite link **and** a **Request to Join** button in the room's chat, and DMs the invite to the member.
-3. Members share the invite or drag friends in. Anyone else can press **Request to Join**.
+   - Posts a 24-hour invite link in the room's chat and DMs it to the member.
+3. Members drag friends in or share the invite. Anyone else knocks via the **🚪 request-to-join** panel.
 
-### Joining a private room (approval flow)
+### Joining a private room (the knock panel)
 
-1. Someone who isn't in the room presses **Request to Join** in the room's chat.
-2. The bot posts a notification in that same chat: *"@user would like to join…"* with **Approve** / **Deny** buttons.
-3. Any member **currently in the room** presses **Approve** → the requester is granted the role (and pulled in if they're already connected to voice), or **Deny** to reject.
+1. In the **🚪 request-to-join** channel, the outsider presses **🔔 Request to Join a Private Room**.
+2. The bot replies **privately** (only they see it) with a dropdown of the active private rooms. They pick one.
+3. The bot posts *"@user would like to join…"* with **Approve** / **Deny** buttons **into that room's chat** (and pings the owner if they're present).
+4. Any member **currently in the room** presses **Approve** → the requester is granted the role (and pulled in if they're already connected to voice), gets a DM, and can join — or **Deny** to reject.
 
-> **Discord limitation:** because `@everyone` is denied **Connect**, Discord blocks the join client-side and emits **no event** the bot could react to — so a literal "clicked the locked channel" can't be detected. The **Request to Join** button is the equivalent knock mechanism, and because outsiders can see the room's chat, they can always reach it.
+> **Why a panel and not the voice channel itself?** Discord won't show a voice channel's built-in *Text-in-Voice* chat to someone who lacks **Connect**, and it emits **no event** when a blocked user clicks a locked channel — so the knock can't live in the private room. The separate **🚪 request-to-join** text channel is visible to everyone, so the knock button is always reachable; the Approve/Deny prompt then goes to the room's chat, which the connected members *can* see.
 
 ### Room deletion
 
@@ -199,7 +202,7 @@ src/
   events/
     ready.ts              # client ready event — starts periodic orphan sweep
     voiceStateUpdate.ts   # routes the two lobbies to public/private room creation + cleanup
-    interactionCreate.ts  # routes slash commands and knock/approval button interactions
+    interactionCreate.ts  # routes slash commands, knock-panel buttons + room-picker menu
   services/
     roomManager.ts        # core orchestration — create/delete rooms and roles, approval flow
   store/
@@ -223,6 +226,7 @@ The `DEFAULTS` object in `src/constants.ts` controls the bot's built-in timing a
 | `sweepIntervalMs` | `60000` | How often to run the orphan sweep (60 seconds) |
 | `publicLobbyChannelName` | `🔊 Join for Public` | Default name for the public lobby channel |
 | `privateLobbyChannelName` | `🔒 Join for Private` | Default name for the private lobby channel |
+| `knockChannelName` | `🚪 request-to-join` | Default name for the knock-panel text channel |
 | `categoryName` | `Voice Rooms` | Default name for the voice category |
 
 To change these, edit the values in `src/constants.ts` before building.
