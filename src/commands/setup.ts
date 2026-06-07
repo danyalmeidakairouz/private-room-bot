@@ -64,15 +64,22 @@ export async function execute(
       categoryMention = createdCategory.name;
     }
 
-    const lobby = await guild.channels.create({
-      name: DEFAULTS.lobbyChannelName,
+    const publicLobby = await guild.channels.create({
+      name: DEFAULTS.publicLobbyChannelName,
+      type: ChannelType.GuildVoice,
+      parent: resolvedCategoryId,
+    });
+
+    const privateLobby = await guild.channels.create({
+      name: DEFAULTS.privateLobbyChannelName,
       type: ChannelType.GuildVoice,
       parent: resolvedCategoryId,
     });
 
     guildConfig.set({
       guildId: guild.id,
-      lobbyChannelId: lobby.id,
+      publicLobbyChannelId: publicLobby.id,
+      privateLobbyChannelId: privateLobby.id,
       categoryId: resolvedCategoryId,
       adminRoleId: adminRole?.id ?? null,
     });
@@ -107,7 +114,7 @@ export async function execute(
       : '';
 
     await interaction.editReply(
-      `✅ Setup complete!\n• **Lobby channel:** <#${lobby.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
+      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
     );
   }
   catch (err) {

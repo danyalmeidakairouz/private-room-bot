@@ -1,15 +1,20 @@
 # Private Room Bot
 
-A discord.js v14 bot that turns a "Join to Create" lobby voice channel into temporary private voice rooms. When a member joins the lobby, the bot creates a new voice channel with a randomly generated name, a matching temporary role placed just below the admin role (and above @everyone), moves the creator into the room, assigns them the role, and generates an invite link posted in the room and sent via DM. When everyone leaves, the room and its temporary role are automatically deleted.
+A discord.js v14 bot that turns two "Join to Create" lobby voice channels into temporary **public** and **private** voice rooms. `/setup` creates a **🔊 Join for Public** and a **🔒 Join for Private** lobby under one category. Joining either lobby spins up a freshly-named room and moves the creator in; when everyone leaves, the room (and, for private rooms, its temporary role) is deleted automatically.
+
+- **Public rooms** — no role, no gate: anyone can see and join. Deleted as soon as the last person leaves.
+- **Private rooms** — role-gated. Everyone can **see** the room but only members can **join**. Outsiders press a **Request to Join** button in the room's chat to knock; any member currently in the room can approve, which grants the role and lets them in.
 
 ---
 
 ## Features
 
-- **One-command setup** — `/setup` creates the lobby channel and stores your guild configuration.
+- **One-command setup** — `/setup` creates both lobby channels (public + private) under one category and stores your guild configuration.
+- **Public & private rooms** — a **🔊 Join for Public** lobby (open to all) and a **🔒 Join for Private** lobby (role-gated).
+- **Knock-to-join approval** — outsiders can see a private room and press **Request to Join**; the bot posts the request in the room's chat and any member inside can **Approve**/**Deny** with a button. Approval grants the role and pulls them in.
 - **Auto-generated room names** — random `Adjective-Noun-XXX` format (e.g. `Brave-Otter-7K2`).
-- **Per-room temporary role** — allows only the invited members to see and join the room; automatically cleaned up when the room empties.
-- **Invite link generation** — 24-hour invite posted in the channel and DMed to the creator.
+- **Per-room temporary role** (private only) — gates who can join; automatically cleaned up when the room empties. Public rooms use no role.
+- **Invite link generation** — 24-hour invite posted in the private room's chat and DMed to the creator.
 - **Grace period** — rooms are deleted after a short delay (5 s default) once empty, to handle brief disconnects.
 - **Periodic orphan sweep** — a background sweep removes any stale rooms and roles every 60 s.
 - **Guild-scoped storage** — configuration and active rooms are persisted to JSON files on disk (no external database needed).
@@ -61,14 +66,17 @@ Build an OAuth2 URL with the required scopes and permissions:
 | Manage Roles | 268,435,456 |
 | Connect | 1,048,576 |
 | Move Members | 16,777,216 |
-| **Total** | **286,262,289** |
+| Send Messages | 2,048 |
+| **Total** | **286,264,337** |
 
-Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 16777216 = 286,262,289`
+Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 16777216 + 2048 = 286,264,337`
+
+**Send Messages** is required so the bot can post the invite message and the **Request to Join** / **Approve** / **Deny** buttons in each room's built-in text chat.
 
 Use this invite URL template (replace `YOUR_CLIENT_ID`):
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=286262289&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=286264337&scope=bot+applications.commands
 ```
 
 ---
@@ -141,25 +149,40 @@ In your Discord server, run the `/setup` slash command. Optional parameters:
 
 | Parameter | Description | Default |
 |---|---|---|
-| `admin_role` | Role to whitelist as room admin (can manage all rooms) | None |
-| `category` | Name of the category to create rooms under | `Private Rooms` |
+| `admin_role` | Role to whitelist as room admin (private temp roles sit just below it) | None |
+| `category` | Name of the category to create the lobbies under | `Voice Rooms` |
 
-This creates the **➕ Join to Create** lobby channel under the specified (or new) category and stores your guild configuration.
+This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby channels under the specified (or new) category and stores your guild configuration.
 
-### Creating a Room
+> **Upgrading from the single-lobby version?** Re-run `/setup` to create the second lobby and refresh the stored config. Until you do, the old lobby keeps working as the private lobby.
 
-1. Any member joins the **➕ Join to Create** lobby.
+### Creating a public room
+
+1. Any member joins the **🔊 Join for Public** lobby.
+2. The bot creates a new voice channel (e.g. `Brave-Otter-7K2`) that **anyone** can see and join, and moves the member in.
+3. When the last person leaves, the channel is deleted.
+
+### Creating a private room
+
+1. Any member joins the **🔒 Join for Private** lobby.
 2. The bot instantly:
-   - Creates a new private voice channel (e.g. `Brave-Otter-7K2`).
-   - Creates a matching temporary role and places it just below the admin role.
+   - Creates a new voice channel where everyone can **see** the room but `@everyone` is denied **Connect**.
+   - Creates a matching temporary role (placed just below the admin role) and assigns it to the creator.
    - Moves the member into the new channel.
-   - Assigns the temporary role to the member.
-   - Posts a 24-hour invite link in the channel and DMs it to the member.
-3. The member can share the invite link or drag friends into the channel directly.
+   - Posts a 24-hour invite link **and** a **Request to Join** button in the room's chat, and DMs the invite to the member.
+3. Members share the invite or drag friends in. Anyone else can press **Request to Join**.
 
-### Room Deletion
+### Joining a private room (approval flow)
 
-When the last member leaves a temporary room, the bot waits 5 seconds (grace period) then deletes the voice channel and its temporary role. If someone rejoins within those 5 seconds, deletion is cancelled.
+1. Someone who isn't in the room presses **Request to Join** in the room's chat.
+2. The bot posts a notification in that same chat: *"@user would like to join…"* with **Approve** / **Deny** buttons.
+3. Any member **currently in the room** presses **Approve** → the requester is granted the role (and pulled in if they're already connected to voice), or **Deny** to reject.
+
+> **Discord limitation:** because `@everyone` is denied **Connect**, Discord blocks the join client-side and emits **no event** the bot could react to — so a literal "clicked the locked channel" can't be detected. The **Request to Join** button is the equivalent knock mechanism, and because outsiders can see the room's chat, they can always reach it.
+
+### Room deletion
+
+When the last member leaves any temporary room, the bot waits 5 seconds (grace period) then deletes the voice channel — and, for private rooms, its temporary role. If someone rejoins within those 5 seconds, deletion is cancelled.
 
 ---
 
@@ -175,14 +198,14 @@ src/
     setup.ts              # /setup slash command builder and handler
   events/
     ready.ts              # client ready event — starts periodic orphan sweep
-    voiceStateUpdate.ts   # handles join/leave logic for lobby and temp rooms
-    interactionCreate.ts  # routes slash command interactions
+    voiceStateUpdate.ts   # routes the two lobbies to public/private room creation + cleanup
+    interactionCreate.ts  # routes slash commands and knock/approval button interactions
   services/
-    roomManager.ts        # core orchestration — create/delete rooms and roles
+    roomManager.ts        # core orchestration — create/delete rooms and roles, approval flow
   store/
     jsonStore.ts          # generic persistent JSON file store
-    guildConfigStore.ts   # per-guild setup configuration (lobby channel, admin role)
-    tempRoomStore.ts      # tracks active temporary rooms and their roles
+    guildConfigStore.ts   # per-guild setup config (public + private lobby ids, admin role)
+    tempRoomStore.ts      # tracks active temp rooms (type: public|private, nullable role)
   util/
     nameGenerator.ts      # generates random Adjective-Noun-XXX room names
 ```
@@ -198,8 +221,9 @@ The `DEFAULTS` object in `src/constants.ts` controls the bot's built-in timing a
 | `graceMs` | `5000` | Milliseconds to wait before deleting an empty room |
 | `inviteMaxAgeSec` | `86400` | Invite lifetime in seconds (24 hours) |
 | `sweepIntervalMs` | `60000` | How often to run the orphan sweep (60 seconds) |
-| `lobbyChannelName` | `➕ Join to Create` | Default name for the lobby channel |
-| `categoryName` | `Private Rooms` | Default name for the voice category |
+| `publicLobbyChannelName` | `🔊 Join for Public` | Default name for the public lobby channel |
+| `privateLobbyChannelName` | `🔒 Join for Private` | Default name for the private lobby channel |
+| `categoryName` | `Voice Rooms` | Default name for the voice category |
 
 To change these, edit the values in `src/constants.ts` before building.
 

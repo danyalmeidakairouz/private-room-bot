@@ -25,7 +25,7 @@ const roomManager = new RoomManager(client, guildConfig, tempRooms);
 
 registerReady(client, roomManager);
 registerVoiceStateUpdate(client, roomManager, guildConfig);
-registerInteractionCreate(client, guildConfig);
+registerInteractionCreate(client, guildConfig, roomManager);
 
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled rejection:', err);

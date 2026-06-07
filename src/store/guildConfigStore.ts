@@ -3,9 +3,16 @@ import { JsonStore } from './jsonStore';
 
 export interface GuildConfig {
   guildId: string;
-  lobbyChannelId: string;
+  publicLobbyChannelId: string;
+  privateLobbyChannelId: string;
   categoryId: string | null;
   adminRoleId: string | null;
+  /**
+   * @deprecated Legacy single-lobby field from the pre-public-rooms config.
+   * Read as the private lobby when {@link privateLobbyChannelId} is absent so
+   * already-deployed guilds keep working until `/setup` is re-run.
+   */
+  lobbyChannelId?: string;
 }
 
 export class GuildConfigStore {
