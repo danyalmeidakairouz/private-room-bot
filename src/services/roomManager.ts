@@ -43,9 +43,15 @@ export class RoomManager {
         return;
       }
 
+      console.log(`[RoomManager] Lobby join detected — creating a room for ${member.user.tag}.`);
+
       // F3: enforce per-owner and per-guild room caps before doing any API calls.
       const existing = this.tempRooms.byGuild(guild.id);
       if (existing.some((r) => r.ownerId === member.id)) {
+        console.log(
+          `[RoomManager] ${member.user.tag} already owns an active room — skipping. ` +
+            `Clear data/temp-rooms.json if this is stale.`,
+        );
         return; // member already owns an active room
       }
       if (existing.length >= DEFAULTS.maxRoomsPerGuild) {
@@ -142,10 +148,16 @@ export class RoomManager {
       // Move owner into the channel; on failure roll back the created resources.
       try {
         await member.voice.setChannel(channel); // F9: no cast needed — create() returns VoiceChannel
-      } catch {
+      } catch (err) {
+        console.error(
+          `[RoomManager] Failed to move ${member.user.tag} into "${name}" — rolling back. Error:`,
+          err,
+        );
         await this.destroyRoom(channel.id, guild);
         return;
       }
+
+      console.log(`[RoomManager] Created room "${name}" for ${member.user.tag} and moved them in.`);
 
       // Create an invite link for easy sharing.
       const invite = await channel

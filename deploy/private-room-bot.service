@@ -2,6 +2,9 @@
 Description=Discord Private Room Bot
 After=network-online.target
 Wants=network-online.target
+# Don't restart-spam if it crash-loops on a bad token (these belong in [Unit]):
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,9 +16,6 @@ ExecStart=/usr/bin/node dist/index.js
 # dotenv loads .env from WorkingDirectory, so no EnvironmentFile is needed.
 Restart=always
 RestartSec=5
-# Don't restart-spam if it crash-loops on a bad token:
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
