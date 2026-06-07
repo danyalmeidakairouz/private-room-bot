@@ -9,11 +9,11 @@ import {
   type Client,
   type Guild,
   type GuildMember,
+  type MessageContextMenuCommandInteraction,
   type VoiceChannel,
 } from 'discord.js';
 import { GuildConfigStore, type GuildConfig } from '../store/guildConfigStore';
 import { TempRoomStore, type RoomType, type TempRoom } from '../store/tempRoomStore';
-import { KnockMuteStore } from '../store/knockMuteStore';
 import { generateRoomName } from '../util/nameGenerator';
 import { BUTTON_IDS, DEFAULTS } from '../constants';
 import { playKnock } from './knockSound';
@@ -24,33 +24,12 @@ export class RoomManager {
   private readonly tempRooms: TempRoomStore;
   private readonly creating = new Set<string>();
   private readonly pendingCleanup = new Set<string>();
-  // Knockers currently being processed (debounce rapid re-joins), keyed by user id.
-  private readonly knocking = new Set<string>();
-  // Users the bot is actively admitting into a room (`guildId:userId`), so the
-  // approval-move doesn't get treated as a fresh knock.
-  private readonly admitting = new Set<string>();
-  // Users we server-muted/deafened for a knock but couldn't un-mute yet (they
-  // disconnected mid-hold). Cleared when they next reconnect — a server-mute
-  // persists across sessions otherwise. Backed by knockMuteStore so a restart
-  // mid-knock can still lift it.
-  private readonly knockMuted = new Set<string>();
-  private readonly knockMuteStore: KnockMuteStore;
   private sweeper: NodeJS.Timeout | null = null;
 
-  constructor(
-    client: Client,
-    guildConfig: GuildConfigStore,
-    tempRooms: TempRoomStore,
-    knockMuteStore: KnockMuteStore,
-  ) {
+  constructor(client: Client, guildConfig: GuildConfigStore, tempRooms: TempRoomStore) {
     this.client = client;
     this.guildConfig = guildConfig;
     this.tempRooms = tempRooms;
-    this.knockMuteStore = knockMuteStore;
-    // Reload any unfinished knock-mutes so they're lifted on the user's next join.
-    for (const userId of knockMuteStore.all()) {
-      this.knockMuted.add(userId);
-    }
   }
 
   static computeRolePosition(botHighestPosition: number, adminPosition: number | null): number {
@@ -152,27 +131,24 @@ export class RoomManager {
         parent: cfg.categoryId ?? undefined,
         permissionOverwrites: [
           {
-            // Anyone may SEE and CONNECT — clicking the channel is the "knock". The
-            // bot instantly mutes/deafens a non-member, plays a knock, and moves
-            // them to the waiting room. Speak is denied so a non-member can't TALK —
-            // but note they can still HEAR until the bot bounces them, and if the bot
-            // is offline they could sit and listen. That's the tradeoff of the
-            // join-to-knock model. The room role grants Speak back to members.
+            // Outsiders can SEE the private room and read its text chat (so they can
+            // knock via the Request-to-Join button) but are denied Connect — they
+            // cannot join. ReadMessageHistory guarantees the knock button is visible
+            // even if the category/guild default denies it.
             id: guild.roles.everyone.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-            deny: [PermissionFlagsBits.Speak],
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+            deny: [PermissionFlagsBits.Connect],
           },
           {
-            // The bot keeps explicit access so it can move members, mute/deafen a
-            // knocker, post messages, create the invite, play the knock sound
-            // (Connect + Speak), and delete the channel.
+            // The bot must keep explicit access to the channel it creates so the
+            // @everyone overwrite never blocks it from moving the owner in, creating
+            // the invite, posting messages, deleting the channel, or playing the
+            // knock sound (Connect + Speak).
             id: me.id,
             allow: [
               PermissionFlagsBits.ViewChannel,
               PermissionFlagsBits.Connect,
               PermissionFlagsBits.Speak,
-              PermissionFlagsBits.MuteMembers,
-              PermissionFlagsBits.DeafenMembers,
               PermissionFlagsBits.MoveMembers,
               PermissionFlagsBits.ManageChannels,
               PermissionFlagsBits.CreateInstantInvite,
@@ -245,13 +221,40 @@ export class RoomManager {
       .createInvite({ maxAge: DEFAULTS.inviteMaxAgeSec, maxUses: 0 })
       .catch(() => null);
 
+    // Post a "card" for this room in the knock channel. Outsiders right-click it
+    // (Apps → Request Access) to knock; the card's message id links back to this room.
+    if (cfg.knockChannelId) {
+      const knockCh = await guild.channels.fetch(cfg.knockChannelId).catch(() => null);
+      if (knockCh?.isTextBased()) {
+        const card = await knockCh
+          .send({
+            content: `🔒 **${name}** — right-click this message → **Apps → Request Access** to ask to join.`,
+          })
+          .catch(() => null);
+        if (card) {
+          roomRecord.cardMessageId = card.id;
+          roomRecord.cardChannelId = knockCh.id;
+          this.tempRooms.add(roomRecord); // re-persist with the card location
+        }
+        else {
+          console.warn(
+            `[RoomManager] Could not post knock card for "${name}" — it won't be requestable until re-created.`,
+          );
+        }
+      }
+    }
+    else {
+      console.warn(
+        `[RoomManager] Guild ${guild.id} has no knock channel — outsiders can't request to join. Re-run /setup.`,
+      );
+    }
+
     // Welcome message in the room's own chat (seen by connected members). The
     // Approve/Deny prompt for a knock will also land here.
     const channelMessage =
       `🔒 Welcome to your private room **${name}**!\n` +
       `• Members can drag friends in or share this invite: ${invite?.url ?? '(invite unavailable)'}\n` +
-      `• Anyone who clicks this channel "knocks": they're briefly held (you'll hear a knock) ` +
-      `and sent to the waiting room. Approve them right here to pull them in.`;
+      `• Outsiders request access from the **🚪 request-to-join** channel — you'll get an Approve/Deny prompt right here.`;
     await channel.send({ content: channelMessage }).catch(() => {});
 
     // DM the owner the shareable invite.
@@ -347,123 +350,98 @@ export class RoomManager {
     }
   }
 
-  // A non-member joined a private room — treat it as a "knock": briefly hold them
-  // (muted + deafened) while the knock sound plays, move them to the waiting room,
-  // and ask the members inside to approve. Called from the voice-state handler.
-  async handleKnock(member: GuildMember, channelId: string): Promise<void> {
-    const room = this.tempRooms.get(channelId);
-    // Only react to a non-member joining a tracked private room.
-    if (!room || room.type !== 'private' || !room.roleId) {
+  // "Request Access" message context-menu command: right-click a room's card in the
+  // knock channel → Apps → Request Access. Posts an Approve/Deny prompt into the
+  // room's chat and plays a knock sound the members inside can hear.
+  async handleRequestAccess(interaction: MessageContextMenuCommandInteraction): Promise<void> {
+    // Defer immediately — the work below does several round-trips and would
+    // otherwise risk blowing Discord's 3s interaction-ack window.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply('Please use this from within the server.').catch(() => {});
       return;
     }
-    if (member.user.bot || member.id === room.ownerId) {
-      return;
-    }
-    if (member.roles.cache.has(room.roleId)) {
-      return; // already an approved member
-    }
-    const admitKey = `${room.guildId}:${member.id}`;
-    if (this.admitting.has(admitKey) || this.knocking.has(member.id)) {
-      return; // we're already admitting them, or a knock is in flight
-    }
 
-    this.knocking.add(member.id);
-    try {
-      const guild = member.guild;
-      const cfg = this.guildConfig.get(guild.id);
-      const waitingRoomId = cfg?.waitingRoomChannelId;
-      const channel = await guild.channels.fetch(channelId).catch(() => null);
-      if (!channel || !channel.isVoiceBased()) {
-        return;
-      }
-
-      console.log(`[RoomManager] Knock: ${member.user.tag} on "${channel.name}".`);
-
-      // Silence their brief presence so they can't hear or be heard at the door.
-      this.knockMuted.add(member.id);
-      this.knockMuteStore.add(member.id);
-      await member.voice.setDeaf(true).catch(() => {});
-      await member.voice.setMute(true).catch(() => {});
-
-      // Play the knock so the members inside hear it.
-      void playKnock(channel);
-
-      // Hold them "at the door" for a beat while the knock plays.
-      await new Promise((resolve) => setTimeout(resolve, DEFAULTS.knockHoldMs));
-
-      // Move them to the waiting room (or disconnect if none is configured), but
-      // only if they're still sitting in the private room.
-      const fresh = await guild.members.fetch(member.id).catch(() => null);
-      if (fresh?.voice.channelId === channelId) {
-        if (waitingRoomId) {
-          await fresh.voice.setChannel(waitingRoomId).catch(() => {});
-        }
-        else {
-          await fresh.voice.disconnect().catch(() => {});
-          console.warn(`[RoomManager] Guild ${guild.id} has no waiting room — re-run /setup.`);
-        }
-      }
-
-      // Lift the mute/deafen while they're still connected. If they disconnected
-      // during the hold, leave them flagged so clearKnockMute() lifts it on their
-      // next join (a server-mute persists across sessions otherwise).
-      const after = await guild.members.fetch(member.id).catch(() => null);
-      if (after?.voice.channelId) {
-        await after.voice.setMute(false).catch(() => {});
-        await after.voice.setDeaf(false).catch(() => {});
-        this.knockMuted.delete(member.id);
-        this.knockMuteStore.remove(member.id);
-      }
-
-      const waitingMention = waitingRoomId ? `<#${waitingRoomId}>` : 'the waiting room';
-      await member
-        .send(
-          `🔔 You knocked on **${channel.name}**. Please wait in ${waitingMention} — ` +
-            `a member there will approve you and you'll be moved in automatically.`,
+    // Map the right-clicked message back to a room via its stored card id.
+    const room = this.tempRooms
+      .byGuild(guild.id)
+      .find((r) => r.cardMessageId === interaction.targetId && r.type === 'private' && r.roleId);
+    if (!room || !room.roleId) {
+      await interaction
+        .editReply(
+          'Right-click one of the room cards in the request-to-join channel and choose **Apps → Request Access**.',
         )
         .catch(() => {});
-
-      // Ask the members inside to approve.
-      const approveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${BUTTON_IDS.approve}:${channelId}:${member.id}`)
-          .setLabel('Approve')
-          .setEmoji('✅')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId(`${BUTTON_IDS.deny}:${channelId}:${member.id}`)
-          .setLabel('Deny')
-          .setEmoji('✖️')
-          .setStyle(ButtonStyle.Danger),
-      );
-      const ownerInRoom = channel.members.has(room.ownerId);
-      const ownerPing = ownerInRoom ? ` <@${room.ownerId}>` : '';
-      const mentionUsers = ownerInRoom ? [member.id, room.ownerId] : [member.id];
-      await channel
-        .send({
-          content:
-            `🔔 <@${member.id}> is knocking to join **${channel.name}** — they're waiting in ` +
-            `${waitingMention}. Any member currently in the room can approve.${ownerPing}`,
-          components: [approveRow],
-          allowedMentions: { users: mentionUsers },
-        })
-        .catch(() => {});
-    }
-    finally {
-      this.knocking.delete(member.id);
-    }
-  }
-
-  // Lift a leftover knock server-mute/deafen if the user disconnected before we
-  // could clear it and has now reconnected. Called on every voice join.
-  async clearKnockMute(member: GuildMember): Promise<void> {
-    if (!this.knockMuted.has(member.id) || !member.voice.channelId) {
       return;
     }
-    await member.voice.setMute(false).catch(() => {});
-    await member.voice.setDeaf(false).catch(() => {});
-    this.knockMuted.delete(member.id);
-    this.knockMuteStore.remove(member.id);
+
+    const channel = await guild.channels.fetch(room.channelId).catch(() => null);
+    if (!channel || !channel.isVoiceBased()) {
+      await interaction.editReply('That room no longer exists.').catch(() => {});
+      return;
+    }
+
+    const requester = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (requester?.roles.cache.has(room.roleId)) {
+      await interaction
+        .editReply(`You already have access to **${channel.name}** — just click it to join.`)
+        .catch(() => {});
+      return;
+    }
+
+    if (channel.members.size === 0) {
+      await interaction
+        .editReply(
+          `Nobody is in **${channel.name}** right now to approve your request. Try again when someone's there.`,
+        )
+        .catch(() => {});
+      return;
+    }
+
+    const approveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BUTTON_IDS.approve}:${room.channelId}:${interaction.user.id}`)
+        .setLabel('Approve')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`${BUTTON_IDS.deny}:${room.channelId}:${interaction.user.id}`)
+        .setLabel('Deny')
+        .setEmoji('✖️')
+        .setStyle(ButtonStyle.Danger),
+    );
+
+    // Ping the owner only if they're actually in the room, so we don't alert
+    // someone who has left (the record outlives their presence until cleanup).
+    const ownerInRoom = channel.members.has(room.ownerId);
+    const ownerPing = ownerInRoom ? ` <@${room.ownerId}>` : '';
+    const mentionUsers = ownerInRoom ? [interaction.user.id, room.ownerId] : [interaction.user.id];
+    const sent = await channel
+      .send({
+        content:
+          `🔔 <@${interaction.user.id}> would like to join **${channel.name}**. ` +
+          `Any member currently in the room can approve.${ownerPing}`,
+        components: [approveRow],
+        allowedMentions: { users: mentionUsers },
+      })
+      .catch(() => null);
+
+    if (!sent) {
+      await interaction
+        .editReply('Could not deliver your request to the room. Please try again shortly.')
+        .catch(() => {});
+      return;
+    }
+
+    await interaction
+      .editReply(`✅ Your request to join **${channel.name}** was sent — a member there can approve you.`)
+      .catch(() => {});
+
+    // Play the knock sound so the people inside hear it. Fire-and-forget: joining,
+    // playing and leaving can take several seconds and must not block the reply.
+    void playKnock(channel);
   }
 
   // A member pressed Approve/Deny on a knock. Only people currently in the room may decide.
@@ -501,15 +479,7 @@ export class RoomManager {
       return;
     }
 
-    const requester = await guild.members.fetch(requesterId).catch(() => null);
-
     if (!approved) {
-      // Send the knocker out of the waiting room, if that's where they are.
-      const waitingRoomId = this.guildConfig.get(guild.id)?.waitingRoomChannelId;
-      if (requester?.voice.channelId && requester.voice.channelId === waitingRoomId) {
-        await requester.voice.disconnect().catch(() => {});
-      }
-      await requester?.send(`✖️ Your request to join **${channel.name}** was denied.`).catch(() => {});
       await interaction
         .update({
           content: `✖️ Request from <@${requesterId}> was denied by <@${interaction.user.id}>.`,
@@ -519,6 +489,7 @@ export class RoomManager {
       return;
     }
 
+    const requester = await guild.members.fetch(requesterId).catch(() => null);
     if (!requester) {
       await interaction
         .update({ content: 'The requester is no longer in this server.', components: [] })
@@ -526,49 +497,24 @@ export class RoomManager {
       return;
     }
 
-    // Already a member (e.g. a stale, superseded prompt) — nothing to do.
-    if (requester.roles.cache.has(room.roleId)) {
-      await interaction
-        .update({
-          content: `✅ <@${requesterId}> is already a member of **${channel.name}**.`,
-          components: [],
-        })
-        .catch(() => {});
-      return;
+    await requester.roles
+      .add(room.roleId)
+      .catch(() => console.warn(`[RoomManager] Could not grant role ${room.roleId} to ${requesterId}.`));
+
+    // If the requester is connected to a *different* voice channel, pull them into
+    // the room; otherwise the role now lets them join on their own.
+    if (requester.voice.channelId && requester.voice.channelId !== channel.id) {
+      await requester.voice.setChannel(channel.id).catch(() => {});
     }
 
-    const waitingRoomId = this.guildConfig.get(guild.id)?.waitingRoomChannelId;
-    // Only auto-move someone who's actually waiting; don't yank them out of a
-    // channel they've since wandered into.
-    const moveIn = !!requester.voice.channelId && requester.voice.channelId === waitingRoomId;
-
-    // Mark them as being admitted so the move below isn't treated as a new knock.
-    const admitKey = `${guild.id}:${requesterId}`;
-    this.admitting.add(admitKey);
-    try {
-      await requester.roles
-        .add(room.roleId)
-        .catch(() => console.warn(`[RoomManager] Could not grant role ${room.roleId} to ${requesterId}.`));
-
-      if (moveIn) {
-        await requester.voice.setChannel(channel.id).catch(() => {});
-      }
-      // Clear any mute/deafen left over from the knock.
-      await requester.voice.setMute(false).catch(() => {});
-      await requester.voice.setDeaf(false).catch(() => {});
-    }
-    finally {
-      // Keep the guard briefly so the post-move voice event doesn't re-knock.
-      setTimeout(() => this.admitting.delete(admitKey), 5000);
-    }
-
-    await requester.send(`✅ You've been approved to join **${channel.name}**.`).catch(() => {});
+    // Best-effort DM so a requester who isn't watching the channel knows they're in.
+    await requester
+      .send(`✅ You've been approved to join **${channel.name}**.`)
+      .catch(() => {});
 
     await interaction
       .update({
-        content:
-          `✅ <@${requesterId}> was approved by <@${interaction.user.id}> and ` +
-          `${moveIn ? 'moved in' : 'can now join'}.`,
+        content: `✅ <@${requesterId}> was approved by <@${interaction.user.id}> and can now join.`,
         components: [],
       })
       .catch(() => {});
@@ -600,6 +546,17 @@ export class RoomManager {
     await guild.channels.delete(channelId, 'Temp room empty').catch(() => {});
     if (room?.roleId) {
       await guild.roles.delete(room.roleId, 'Temp room closed').catch(() => {});
+    }
+    // Remove the room's card from the channel it was posted in (stored on the
+    // record, so re-running /setup to a new knock channel can't orphan it).
+    if (room?.cardMessageId) {
+      const cardChannelId = room.cardChannelId ?? this.guildConfig.get(guild.id)?.knockChannelId;
+      if (cardChannelId) {
+        const knockCh = await guild.channels.fetch(cardChannelId).catch(() => null);
+        if (knockCh?.isTextBased()) {
+          await knockCh.messages.delete(room.cardMessageId).catch(() => {});
+        }
+      }
     }
     this.tempRooms.remove(channelId);
   }

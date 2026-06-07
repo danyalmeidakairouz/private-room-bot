@@ -2,7 +2,6 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { loadConfig } from './config';
 import { GuildConfigStore } from './store/guildConfigStore';
 import { TempRoomStore } from './store/tempRoomStore';
-import { KnockMuteStore } from './store/knockMuteStore';
 import { RoomManager } from './services/roomManager';
 import { registerReady } from './events/ready';
 import { registerVoiceStateUpdate } from './events/voiceStateUpdate';
@@ -22,8 +21,7 @@ const client = new Client({
 
 const guildConfig = new GuildConfigStore(config.dataDir);
 const tempRooms = new TempRoomStore(config.dataDir);
-const knockMutes = new KnockMuteStore(config.dataDir);
-const roomManager = new RoomManager(client, guildConfig, tempRooms, knockMutes);
+const roomManager = new RoomManager(client, guildConfig, tempRooms);
 
 registerReady(client, roomManager);
 registerVoiceStateUpdate(client, roomManager, guildConfig);

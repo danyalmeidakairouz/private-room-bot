@@ -1,5 +1,6 @@
 import { Events, MessageFlags, type Client } from 'discord.js';
 import * as setup from '../commands/setup';
+import * as requestAccess from '../commands/requestAccess';
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { RoomManager } from '../services/roomManager';
 import { BUTTON_IDS } from '../constants';
@@ -18,6 +19,14 @@ export function registerInteractionCreate(
         const prefix = interaction.customId.split(':')[0];
         if (ROOM_BUTTON_PREFIXES.includes(prefix)) {
           await roomManager.handleButton(interaction);
+        }
+        return;
+      }
+
+      // "Request Access" message context-menu command.
+      if (interaction.isMessageContextMenuCommand()) {
+        if (interaction.commandName === requestAccess.data.name) {
+          await roomManager.handleRequestAccess(interaction);
         }
         return;
       }

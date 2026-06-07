@@ -82,50 +82,53 @@ export async function execute(
       parent: resolvedCategoryId,
     });
 
-    // Waiting room: a voice channel where knockers are held until a member of the
-    // room they tried to join approves them. Everyone can be moved here; Speak is
-    // denied so it stays quiet.
-    const waitingRoom = await guild.channels.create({
-      name: DEFAULTS.waitingRoomChannelName,
-      type: ChannelType.GuildVoice,
+    // Knock panel: a text channel everyone can see but not post in (bot only).
+    // Outsiders press the button here to request access to a private room — they
+    // can't reach a private voice channel's own chat, so the knock lives here.
+    const knockChannel = await guild.channels.create({
+      name: DEFAULTS.knockChannelName,
+      type: ChannelType.GuildText,
       parent: resolvedCategoryId,
       permissionOverwrites: [
         {
           id: guild.roles.everyone.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-          deny: [PermissionFlagsBits.Speak],
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          deny: [PermissionFlagsBits.SendMessages],
         },
         {
           id: me.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.Connect,
-            PermissionFlagsBits.MoveMembers,
-            PermissionFlagsBits.MuteMembers,
-            PermissionFlagsBits.DeafenMembers,
-          ],
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
         },
       ],
     });
+
+    await knockChannel
+      .send({
+        content:
+          '🔒 **Private rooms**\n' +
+          'You can see private rooms but not join them directly. Each active private room ' +
+          'gets its own message below — **right-click it → Apps → Request Access** to ask to ' +
+          'join, and a member inside will approve you (they\'ll hear a knock).',
+      })
+      .catch(() => {});
 
     guildConfig.set({
       guildId: guild.id,
       publicLobbyChannelId: publicLobby.id,
       privateLobbyChannelId: privateLobby.id,
-      waitingRoomChannelId: waitingRoom.id,
+      knockChannelId: knockChannel.id,
       categoryId: resolvedCategoryId,
       adminRoleId: adminRole?.id ?? null,
     });
 
-    // Best-effort: remove the previous run's bot-created lobby/waiting/knock
-    // channels so a re-run doesn't orphan them. The category is intentionally left
-    // alone (it may still hold active rooms).
+    // Best-effort: remove the previous run's bot-created lobby/knock channels so a
+    // re-run doesn't orphan them or leave a second working knock panel. The
+    // category is intentionally left alone (it may still hold active rooms).
     if (oldCfg) {
-      const newIds = new Set([publicLobby.id, privateLobby.id, waitingRoom.id]);
+      const newIds = new Set([publicLobby.id, privateLobby.id, knockChannel.id]);
       const staleIds = [
         oldCfg.publicLobbyChannelId,
         oldCfg.privateLobbyChannelId,
-        oldCfg.waitingRoomChannelId,
         oldCfg.knockChannelId,
         oldCfg.lobbyChannelId,
       ];
@@ -164,7 +167,7 @@ export async function execute(
       : '';
 
     await interaction.editReply(
-      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Waiting room:** <#${waitingRoom.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
+      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Request to join:** <#${knockChannel.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
     );
   }
   catch (err) {
