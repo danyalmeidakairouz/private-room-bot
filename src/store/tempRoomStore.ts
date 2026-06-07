@@ -1,12 +1,17 @@
 import * as path from 'path';
 import { JsonStore } from './jsonStore';
 
+export type RoomType = 'public' | 'private';
+
 export interface TempRoom {
   channelId: string;
-  roleId: string;
+  /** Gating role id for private rooms; `null` for public rooms (no role is created). */
+  roleId: string | null;
   ownerId: string;
   guildId: string;
   createdAt: number;
+  /** Defaults to `'private'` when absent so legacy records keep their behavior. */
+  type: RoomType;
 }
 
 export class TempRoomStore {

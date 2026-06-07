@@ -57,6 +57,16 @@ export const DEFAULTS = {
   inviteMaxAgeSec: 86400,
   sweepIntervalMs: 60000,
   maxRoomsPerGuild: 50,
-  lobbyChannelName: '➕ Join to Create',
-  categoryName: 'Private Rooms',
+  publicLobbyChannelName: '🔊 Join for Public',
+  privateLobbyChannelName: '🔒 Join for Private',
+  categoryName: 'Voice Rooms',
+} as const;
+
+// customId prefixes for the private-room knock/approval buttons.
+// Format: `${prefix}:${channelId}` for requests, `${prefix}:${channelId}:${userId}`
+// for approve/deny. customIds are capped at 100 chars — two snowflakes fit easily.
+export const BUTTON_IDS = {
+  request: 'room_req',
+  approve: 'room_apv',
+  deny: 'room_dny',
 } as const;
