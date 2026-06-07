@@ -53,7 +53,8 @@ export const NOUNS: string[] = [
 ];
 
 export const DEFAULTS = {
-  graceMs: 5000,
+  // 0 = delete a room the instant its last member leaves (no grace window).
+  graceMs: 0,
   inviteMaxAgeSec: 86400,
   sweepIntervalMs: 60000,
   maxRoomsPerGuild: 50,
@@ -63,21 +64,15 @@ export const DEFAULTS = {
   categoryName: 'Voice Rooms',
 } as const;
 
-// customId prefixes for the knock/approval buttons.
-//   knock                                  — the static panel button (whole guild)
-//   `${approve}:${channelId}:${userId}`    — a member approves the requester
-//   `${deny}:${channelId}:${userId}`       — a member denies the requester
-//   request (legacy)                       — old in-voice button; now redirects
+// customId prefixes for the approval buttons posted in a private room's chat.
+//   `${approve}:${channelId}:${userId}`  — a member approves the requester
+//   `${deny}:${channelId}:${userId}`     — a member denies the requester
 // customIds are capped at 100 chars — two snowflakes fit easily.
 export const BUTTON_IDS = {
-  knock: 'room_knock',
-  request: 'room_req',
   approve: 'room_apv',
   deny: 'room_dny',
 } as const;
 
-// customId prefixes for select menus. `pick` is the ephemeral room picker shown
-// after the knock button is pressed; the chosen option value is the room channelId.
-export const SELECT_IDS = {
-  pick: 'room_pick',
-} as const;
+// Name of the "Request Access" message context-menu command (right-click a room
+// card → Apps → Request Access). Spaces/caps are allowed for context-menu commands.
+export const REQUEST_ACCESS_COMMAND = 'Request Access';

@@ -1,7 +1,4 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
@@ -11,7 +8,7 @@ import {
   type CategoryChannel,
 } from 'discord.js';
 import { GuildConfigStore } from '../store/guildConfigStore';
-import { BUTTON_IDS, DEFAULTS } from '../constants';
+import { DEFAULTS } from '../constants';
 
 export const data: SlashCommandBuilder = new SlashCommandBuilder()
   .setName('setup')
@@ -105,20 +102,13 @@ export async function execute(
       ],
     });
 
-    const knockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(BUTTON_IDS.knock)
-        .setLabel('Request to Join a Private Room')
-        .setEmoji('🔔')
-        .setStyle(ButtonStyle.Primary),
-    );
     await knockChannel
       .send({
         content:
           '🔒 **Private rooms**\n' +
-          'You can see private rooms but not join them directly. Press the button below, ' +
-          'pick the room you want, and a member inside will approve you.',
-        components: [knockRow],
+          'You can see private rooms but not join them directly. Each active private room ' +
+          'gets its own message below — **right-click it → Apps → Request Access** to ask to ' +
+          'join, and a member inside will approve you (they\'ll hear a knock).',
       })
       .catch(() => {});
 
