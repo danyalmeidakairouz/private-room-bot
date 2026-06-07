@@ -61,14 +61,14 @@ Build an OAuth2 URL with the required scopes and permissions:
 | Manage Roles | 268,435,456 |
 | Connect | 1,048,576 |
 | Move Members | 16,777,216 |
-| **Total** | **286,263,309** |
+| **Total** | **286,262,289** |
 
-Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 16777216 = 286,263,309`
+Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 16777216 = 286,262,289`
 
 Use this invite URL template (replace `YOUR_CLIENT_ID`):
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=286263309&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=286262289&scope=bot+applications.commands
 ```
 
 ---
