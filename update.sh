@@ -36,13 +36,19 @@ echo "==> Building…"
 npm run build
 
 echo "==> Restarting service '${SERVICE}'…"
-if systemctl list-unit-files | grep -q "^${SERVICE}.service"; then
+# `systemctl cat` exits non-zero only when the unit truly doesn't exist — a far
+# more reliable existence check than grepping list-unit-files output.
+if systemctl cat "${SERVICE}.service" >/dev/null 2>&1; then
   sudo systemctl restart "${SERVICE}"
   echo "==> Status:"
   systemctl --no-pager --lines=0 status "${SERVICE}" || true
   echo
   echo "Done. Live logs:  journalctl -u ${SERVICE} -f"
 else
-  echo "!! systemd service '${SERVICE}' not found — start the bot however you run it." >&2
-  echo "   (Manual run:  npm start )" >&2
+  echo "!! systemd unit '${SERVICE}.service' is not installed on this host." >&2
+  echo "   Install it once with:" >&2
+  echo "     sudo cp deploy/${SERVICE}.service /etc/systemd/system/" >&2
+  echo "     sudoedit /etc/systemd/system/${SERVICE}.service   # set User= and WorkingDirectory=" >&2
+  echo "     sudo systemctl daemon-reload && sudo systemctl enable --now ${SERVICE}" >&2
+  echo "   Or run the bot directly for now:  npm start" >&2
 fi
