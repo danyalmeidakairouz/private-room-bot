@@ -205,6 +205,15 @@ To change these, edit the values in `src/constants.ts` before building.
 
 ---
 
+## Hosting / Deployment
+
+The bot is a persistent process (a long-lived Discord gateway connection), so it
+needs an **always-on** host with **persistent disk** — not a serverless platform.
+For a free Google Cloud `e2-micro` VM, see [`deploy/DEPLOY-GCP.md`](deploy/DEPLOY-GCP.md)
+(uses the systemd unit in [`deploy/private-room-bot.service`](deploy/private-room-bot.service)).
+
+---
+
 ## Troubleshooting
 
 ### The bot cannot create or delete roles
