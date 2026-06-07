@@ -1,14 +1,11 @@
 import { Events, MessageFlags, type Client } from 'discord.js';
 import * as setup from '../commands/setup';
+import * as requestAccess from '../commands/requestAccess';
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { RoomManager } from '../services/roomManager';
 import { BUTTON_IDS } from '../constants';
 
-const ROOM_BUTTON_PREFIXES: readonly string[] = [
-  BUTTON_IDS.request,
-  BUTTON_IDS.approve,
-  BUTTON_IDS.deny,
-];
+const ROOM_BUTTON_PREFIXES: readonly string[] = [BUTTON_IDS.approve, BUTTON_IDS.deny];
 
 export function registerInteractionCreate(
   client: Client,
@@ -17,11 +14,19 @@ export function registerInteractionCreate(
 ): void {
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      // Private-room knock/approval buttons.
+      // Approve/Deny buttons posted in a private room's chat.
       if (interaction.isButton()) {
         const prefix = interaction.customId.split(':')[0];
         if (ROOM_BUTTON_PREFIXES.includes(prefix)) {
           await roomManager.handleButton(interaction);
+        }
+        return;
+      }
+
+      // "Request Access" message context-menu command.
+      if (interaction.isMessageContextMenuCommand()) {
+        if (interaction.commandName === requestAccess.data.name) {
+          await roomManager.handleRequestAccess(interaction);
         }
         return;
       }

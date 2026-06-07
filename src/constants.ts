@@ -53,20 +53,26 @@ export const NOUNS: string[] = [
 ];
 
 export const DEFAULTS = {
-  graceMs: 5000,
+  // 0 = delete a room the instant its last member leaves (no grace window).
+  graceMs: 0,
   inviteMaxAgeSec: 86400,
   sweepIntervalMs: 60000,
   maxRoomsPerGuild: 50,
   publicLobbyChannelName: '🔊 Join for Public',
   privateLobbyChannelName: '🔒 Join for Private',
+  knockChannelName: '🚪 request-to-join',
   categoryName: 'Voice Rooms',
 } as const;
 
-// customId prefixes for the private-room knock/approval buttons.
-// Format: `${prefix}:${channelId}` for requests, `${prefix}:${channelId}:${userId}`
-// for approve/deny. customIds are capped at 100 chars — two snowflakes fit easily.
+// customId prefixes for the approval buttons posted in a private room's chat.
+//   `${approve}:${channelId}:${userId}`  — a member approves the requester
+//   `${deny}:${channelId}:${userId}`     — a member denies the requester
+// customIds are capped at 100 chars — two snowflakes fit easily.
 export const BUTTON_IDS = {
-  request: 'room_req',
   approve: 'room_apv',
   deny: 'room_dny',
 } as const;
+
+// Name of the "Request Access" message context-menu command (right-click a room
+// card → Apps → Request Access). Spaces/caps are allowed for context-menu commands.
+export const REQUEST_ACCESS_COMMAND = 'Request Access';

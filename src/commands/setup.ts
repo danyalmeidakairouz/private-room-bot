@@ -45,6 +45,10 @@ export async function execute(
   const guild = interaction.guild;
 
   try {
+    // Snapshot any prior config so we can tear down the channels the last /setup
+    // created (otherwise re-running leaves orphaned lobbies and a duplicate panel).
+    const oldCfg = guildConfig.get(guild.id);
+
     const adminRole = interaction.options.getRole('admin_role');
     const category = interaction.options.getChannel('category') as CategoryChannel | null;
 
@@ -64,6 +68,8 @@ export async function execute(
       categoryMention = createdCategory.name;
     }
 
+    const me = await guild.members.fetchMe();
+
     const publicLobby = await guild.channels.create({
       name: DEFAULTS.publicLobbyChannelName,
       type: ChannelType.GuildVoice,
@@ -76,15 +82,62 @@ export async function execute(
       parent: resolvedCategoryId,
     });
 
+    // Knock panel: a text channel everyone can see but not post in (bot only).
+    // Outsiders press the button here to request access to a private room — they
+    // can't reach a private voice channel's own chat, so the knock lives here.
+    const knockChannel = await guild.channels.create({
+      name: DEFAULTS.knockChannelName,
+      type: ChannelType.GuildText,
+      parent: resolvedCategoryId,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          deny: [PermissionFlagsBits.SendMessages],
+        },
+        {
+          id: me.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+        },
+      ],
+    });
+
+    await knockChannel
+      .send({
+        content:
+          '🔒 **Private rooms**\n' +
+          'You can see private rooms but not join them directly. Each active private room ' +
+          'gets its own message below — **right-click it → Apps → Request Access** to ask to ' +
+          'join, and a member inside will approve you (they\'ll hear a knock).',
+      })
+      .catch(() => {});
+
     guildConfig.set({
       guildId: guild.id,
       publicLobbyChannelId: publicLobby.id,
       privateLobbyChannelId: privateLobby.id,
+      knockChannelId: knockChannel.id,
       categoryId: resolvedCategoryId,
       adminRoleId: adminRole?.id ?? null,
     });
 
-    const me = await guild.members.fetchMe();
+    // Best-effort: remove the previous run's bot-created lobby/knock channels so a
+    // re-run doesn't orphan them or leave a second working knock panel. The
+    // category is intentionally left alone (it may still hold active rooms).
+    if (oldCfg) {
+      const newIds = new Set([publicLobby.id, privateLobby.id, knockChannel.id]);
+      const staleIds = [
+        oldCfg.publicLobbyChannelId,
+        oldCfg.privateLobbyChannelId,
+        oldCfg.knockChannelId,
+        oldCfg.lobbyChannelId,
+      ];
+      for (const staleId of staleIds) {
+        if (staleId && !newIds.has(staleId)) {
+          await guild.channels.delete(staleId, 'Replaced by /setup re-run').catch(() => {});
+        }
+      }
+    }
 
     // F8: Check the bot has the runtime permissions needed to manage temp rooms.
     const required = [
@@ -114,7 +167,7 @@ export async function execute(
       : '';
 
     await interaction.editReply(
-      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
+      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Request to join:** <#${knockChannel.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
     );
   }
   catch (err) {

@@ -12,6 +12,11 @@ export interface TempRoom {
   createdAt: number;
   /** Defaults to `'private'` when absent so legacy records keep their behavior. */
   type: RoomType;
+  /** Id of this room's card message in the knock channel (private rooms only). */
+  cardMessageId?: string;
+  /** Channel the card was posted in — stored so cleanup targets the right channel
+   *  even if `/setup` is later re-run and points the config at a new one. */
+  cardChannelId?: string;
 }
 
 export class TempRoomStore {

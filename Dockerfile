@@ -27,6 +27,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Compiled JS from the build stage.
 COPY --from=builder /app/dist ./dist
 
+# Static assets (the knock sound played on a request).
+COPY assets ./assets
+
 # Persist bot state across container restarts (mount a volume here).
 RUN mkdir -p /app/data && chown -R node:node /app
 VOLUME ["/app/data"]

@@ -5,6 +5,11 @@ export interface GuildConfig {
   guildId: string;
   publicLobbyChannelId: string;
   privateLobbyChannelId: string;
+  /**
+   * Text channel holding the "Request to Join" knock panel. Absent on configs
+   * written before the knock-panel feature — re-run `/setup` to create it.
+   */
+  knockChannelId?: string;
   categoryId: string | null;
   adminRoleId: string | null;
   /**
