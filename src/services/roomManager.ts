@@ -88,6 +88,20 @@ export class RoomManager {
             deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
           },
           {
+            // The bot must keep explicit access to the private channel it creates,
+            // otherwise the @everyone deny blocks it from moving the owner in,
+            // creating the invite, posting the message, or deleting the channel.
+            id: me.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.Connect,
+              PermissionFlagsBits.MoveMembers,
+              PermissionFlagsBits.ManageChannels,
+              PermissionFlagsBits.CreateInstantInvite,
+              PermissionFlagsBits.SendMessages,
+            ],
+          },
+          {
             id: role.id,
             allow: [
               PermissionFlagsBits.ViewChannel,
