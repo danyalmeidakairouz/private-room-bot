@@ -6,9 +6,11 @@ export interface GuildConfig {
   publicLobbyChannelId: string;
   privateLobbyChannelId: string;
   /**
-   * Text channel holding the "Request to Join" knock panel. Absent on configs
-   * written before the knock-panel feature — re-run `/setup` to create it.
+   * Voice channel knockers are held in while they wait for approval. Absent on
+   * configs written before the waiting-room feature — re-run `/setup` to create it.
    */
+  waitingRoomChannelId?: string;
+  /** @deprecated Old request-to-join text channel; no longer created or used. */
   knockChannelId?: string;
   categoryId: string | null;
   adminRoleId: string | null;

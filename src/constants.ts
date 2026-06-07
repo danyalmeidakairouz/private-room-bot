@@ -60,19 +60,18 @@ export const DEFAULTS = {
   maxRoomsPerGuild: 50,
   publicLobbyChannelName: '🔊 Join for Public',
   privateLobbyChannelName: '🔒 Join for Private',
-  knockChannelName: '🚪 request-to-join',
+  waitingRoomChannelName: '⏳ Waiting Room',
   categoryName: 'Voice Rooms',
+  // How long a knocker is held (muted + deafened) in the private room while the
+  // knock sound plays, before being moved to the waiting room.
+  knockHoldMs: 1200,
 } as const;
 
 // customId prefixes for the approval buttons posted in a private room's chat.
-//   `${approve}:${channelId}:${userId}`  — a member approves the requester
-//   `${deny}:${channelId}:${userId}`     — a member denies the requester
+//   `${approve}:${channelId}:${userId}`  — a member approves the knocker
+//   `${deny}:${channelId}:${userId}`     — a member denies the knocker
 // customIds are capped at 100 chars — two snowflakes fit easily.
 export const BUTTON_IDS = {
   approve: 'room_apv',
   deny: 'room_dny',
 } as const;
-
-// Name of the "Request Access" message context-menu command (right-click a room
-// card → Apps → Request Access). Spaces/caps are allowed for context-menu commands.
-export const REQUEST_ACCESS_COMMAND = 'Request Access';

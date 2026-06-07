@@ -3,7 +3,7 @@
 A discord.js v14 bot that turns two "Join to Create" lobby voice channels into temporary **public** and **private** voice rooms. `/setup` creates a **🔊 Join for Public** and a **🔒 Join for Private** lobby under one category. Joining either lobby spins up a freshly-named room and moves the creator in; when everyone leaves, the room (and, for private rooms, its temporary role) is deleted automatically.
 
 - **Public rooms** — no role, no gate: anyone can see and join. Deleted as soon as the last person leaves.
-- **Private rooms** — role-gated. Everyone can **see** the room but only members can **join**. Each room posts a card in the **🚪 request-to-join** channel; an outsider **right-clicks the card → Apps → Request Access**, a knock sound plays inside the room, and any member there can approve (which grants the role and auto-moves them in).
+- **Private rooms** — anyone can **click to join**, but a non-member is instantly muted/deafened, a **knock sound** plays for the people inside, and they're shunted to a **⏳ Waiting Room**. A member then **Approves** them in the room's chat and they're auto-moved in. Only the room role can actually speak.
 
 ---
 
@@ -11,7 +11,7 @@ A discord.js v14 bot that turns two "Join to Create" lobby voice channels into t
 
 - **One-command setup** — `/setup` creates both lobby channels (public + private) under one category and stores your guild configuration.
 - **Public & private rooms** — a **🔊 Join for Public** lobby (open to all) and a **🔒 Join for Private** lobby (role-gated).
-- **Right-click to knock** — each private room posts a card in **🚪 request-to-join**; outsiders **right-click it → Apps → Request Access**. The bot plays an audible **knock sound** in the room and posts an **Approve**/**Deny** prompt for the members inside; approval grants the role and auto-moves the requester in.
+- **Click-to-knock + waiting room** — clicking a private channel *is* the knock. The non-member is briefly muted/deafened (an audible **knock sound** plays for the people inside), then moved to a **⏳ Waiting Room**. A member clicks **Approve** in the room's chat and the knocker is auto-moved in.
 - **Instant cleanup** — a room is deleted the moment its last member leaves.
 - **Auto-generated room names** — random `Adjective-Noun-XXX` format (e.g. `Brave-Otter-7K2`).
 - **Per-room temporary role** (private only) — gates who can join; automatically cleaned up when the room empties. Public rooms use no role.
@@ -68,17 +68,19 @@ Build an OAuth2 URL with the required scopes and permissions:
 | Connect | 1,048,576 |
 | Speak | 2,097,152 |
 | Move Members | 16,777,216 |
+| Mute Members | 4,194,304 |
+| Deafen Members | 8,388,608 |
 | Send Messages | 2,048 |
-| **Total** | **288,361,489** |
+| **Total** | **300,944,401** |
 
-Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 2097152 + 16777216 + 2048 = 288,361,489`
+Calculation: `1024 + 1 + 16 + 268435456 + 1048576 + 2097152 + 16777216 + 4194304 + 8388608 + 2048 = 300,944,401`
 
-**Send Messages** lets the bot post the room cards, invite messages and Approve/Deny prompts. **Speak** lets it play the knock sound inside a private room when someone requests access.
+**Speak** lets the bot play the knock sound inside a room. **Mute Members** + **Deafen Members** let it silence a knocker for the fraction of a second they're at the door — these are **guild-level** moderation permissions, so they must come from the invite/role (a per-channel grant is not enough). **Move Members** is what moves a knocker to the waiting room and an approved user into the room.
 
 Use this invite URL template (replace `YOUR_CLIENT_ID`):
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=288361489&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=300944401&scope=bot+applications.commands
 ```
 
 ---
@@ -125,13 +127,13 @@ GUILD_ID=your-test-guild-id-here
 DATA_DIR=./data
 ```
 
-Register the application commands (the `/setup` slash command **and** the **Request Access** right-click message command):
+Register the `/setup` slash command:
 
 ```bash
 npm run deploy
 ```
 
-> Re-run `npm run deploy` whenever the commands change (e.g. after pulling an update that adds the **Request Access** command). The knock sound ships as a pre-encoded `assets/knock.ogg`, so **no ffmpeg install is needed**.
+> Re-run `npm run deploy` after pulling an update that changes the commands (this version also removes the old **Request Access** right-click command). The knock sound ships as a pre-encoded `assets/knock.ogg`, so **no ffmpeg install is needed**.
 
 Start the bot:
 
@@ -156,11 +158,9 @@ In your Discord server, run the `/setup` slash command. Optional parameters:
 | `admin_role` | Role to whitelist as room admin (private temp roles sit just below it) | None |
 | `category` | Name of the category to create the lobbies under | `Voice Rooms` |
 
-This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby channels, plus a **🚪 request-to-join** channel, under the specified (or new) category, and stores your guild configuration.
+This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby channels, plus a **⏳ Waiting Room** voice channel, under the specified (or new) category, and stores your guild configuration.
 
-> **Re-running `/setup`** is safe: it rebuilds the lobby and **🚪 request-to-join** channels and automatically deletes the previous run's bot-created lobby/knock channels (the category is left alone in case it still holds active rooms).
-
-> **Upgrading from the single-lobby version?** Re-run `/setup` to create the second lobby and refresh the stored config. Until you do, the old lobby keeps working as the private lobby.
+> **Re-running `/setup`** is safe: it rebuilds the lobby + waiting-room channels and automatically deletes the previous run's bot-created lobby/waiting/knock channels (the category is left alone in case it still holds active rooms).
 
 ### Creating a public room
 
@@ -172,24 +172,23 @@ This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby ch
 
 1. Any member joins the **🔒 Join for Private** lobby.
 2. The bot instantly:
-   - Creates a new voice channel where everyone can **see** the room but `@everyone` is denied **Connect**.
-   - Creates a matching temporary role (placed just below the admin role) and assigns it to the creator.
-   - Moves the member into the new channel.
-   - Posts a 24-hour invite link in the room's chat and DMs it to the member.
-3. Members drag friends in or share the invite. Anyone else requests access from the **🚪 request-to-join** channel (below).
+   - Creates a voice channel where `@everyone` can **see and connect** but is denied **Speak** (so a non-member who joins can't talk).
+   - Creates a matching temporary role (placed just below the admin role), assigns it to the creator — the role is what grants **Speak**.
+   - Moves the member into the new channel and DMs them a 24-hour invite link.
+3. Members drag friends in or share the invite. Anyone else just **clicks the channel** to knock (below).
 
-### Joining a private room (right-click → Request Access)
+### Joining a private room (click-to-knock)
 
-1. Each active private room has a **card message** in the **🚪 request-to-join** channel.
-2. The outsider **right-clicks that card → Apps → Request Access**.
-3. The bot plays an audible **knock sound** inside the room and posts *"@user would like to join…"* with **Approve** / **Deny** buttons **into the room's chat** (pinging the owner if present). The requester gets a private "request sent" reply.
-4. Any member **currently in the room** presses **Approve** → the requester is granted the role, **auto-moved in** if they're connected to voice, and DMed — or **Deny** to reject.
+1. A non-member **clicks the private channel** as if joining.
+2. The bot **server-mutes + deafens** them for a fraction of a second while an audible **knock sound** plays for the people inside, then **moves them to the ⏳ Waiting Room** and DMs them.
+3. An **Approve** / **Deny** prompt (pinging the owner if present) appears **in the room's chat**, where the connected members can see it.
+4. Any member **currently in the room** presses **Approve** → the knocker is granted the role and **auto-moved in from the waiting room** (and DMed) — or **Deny**, which sends them out of the waiting room.
 
-> **Why a card-and-context-menu and not the channel itself?** Discord doesn't let bots add anything to a *channel's* right-click menu, and it won't show a locked voice channel's *Text-in-Voice* chat to someone who lacks **Connect**. Bots *can* add a right-click action to a **message**, so each room gets a card you can right-click. The Approve/Deny prompt then goes to the room's chat, which the connected members can see, and the knock sound is played in the channel for them to hear.
+> **⚠️ Privacy tradeoff.** Because the channel now allows **Connect**, the room is enforced by the *bot*, not by Discord permissions. A non-member can't **talk** (Speak is denied), but they **can hear** for the brief moment before the bot bounces them — and if the **bot is offline**, an outsider could sit in the room and listen. This is the cost of the "click the channel to knock" model; if you need a room that stays private even when the bot is down, that requires the permission-gated (right-click) approach instead.
 
 ### Room deletion
 
-A temporary room is deleted **the instant its last member leaves** — the voice channel, its card, and (for private rooms) its temporary role all go away immediately.
+A temporary room is deleted **the instant its last member leaves** — the voice channel and (for private rooms) its temporary role go away immediately.
 
 ---
 
@@ -205,14 +204,16 @@ src/
     setup.ts              # /setup slash command builder and handler
   events/
     ready.ts              # client ready event — starts periodic orphan sweep
-    voiceStateUpdate.ts   # routes the two lobbies to public/private room creation + cleanup
-    interactionCreate.ts  # routes /setup, the Request Access context menu, Approve/Deny buttons
+    voiceStateUpdate.ts   # lobbies → room creation, non-member join → knock, + cleanup
+    interactionCreate.ts  # routes /setup and the Approve/Deny buttons
   services/
-    roomManager.ts        # core orchestration — create/delete rooms and roles, approval flow
+    roomManager.ts        # core orchestration — rooms/roles, knock flow, approval
+    knockSound.ts         # joins a room and plays assets/knock.ogg via @discordjs/voice
   store/
     jsonStore.ts          # generic persistent JSON file store
-    guildConfigStore.ts   # per-guild setup config (public + private lobby ids, admin role)
+    guildConfigStore.ts   # per-guild config (lobby ids, waiting room id, admin role)
     tempRoomStore.ts      # tracks active temp rooms (type: public|private, nullable role)
+    knockMuteStore.ts     # remembers in-progress knock mutes so a restart can lift them
   util/
     nameGenerator.ts      # generates random Adjective-Noun-XXX room names
 ```
@@ -230,7 +231,8 @@ The `DEFAULTS` object in `src/constants.ts` controls the bot's built-in timing a
 | `sweepIntervalMs` | `60000` | How often to run the orphan sweep (60 seconds) |
 | `publicLobbyChannelName` | `🔊 Join for Public` | Default name for the public lobby channel |
 | `privateLobbyChannelName` | `🔒 Join for Private` | Default name for the private lobby channel |
-| `knockChannelName` | `🚪 request-to-join` | Default name for the request-to-join text channel |
+| `waitingRoomChannelName` | `⏳ Waiting Room` | Default name for the waiting-room channel |
+| `knockHoldMs` | `1200` | How long a knocker is held (muted/deafened) while the knock plays, before being moved to the waiting room |
 | `categoryName` | `Voice Rooms` | Default name for the voice category |
 
 To change these, edit the values in `src/constants.ts` before building.

@@ -20,13 +20,29 @@ export function registerVoiceStateUpdate(
       const privateLobbyId = cfg.privateLobbyChannelId ?? cfg.lobbyChannelId;
       const publicLobbyId = cfg.publicLobbyChannelId;
 
-      // JOIN-TO-CREATE: member joined one of the lobby channels — create the matching room.
-      if (newState.channelId && newState.member) {
-        if (newState.channelId === privateLobbyId) {
+      // Only react to an actual channel join/move — NOT mute/deafen self-updates
+      // (those keep the same channelId, and the bot itself toggles mute during a
+      // knock; reacting to them would instantly undo the knock mute).
+      const joinedChannelId =
+        newState.channelId && newState.channelId !== oldState.channelId ? newState.channelId : null;
+
+      if (joinedChannelId && newState.member) {
+        // Safety: lift a leftover knock mute/deafen if they reconnected after one.
+        await roomManager.clearKnockMute(newState.member);
+
+        if (joinedChannelId === privateLobbyId) {
+          // JOIN-TO-CREATE: spin up a private room.
           await roomManager.createRoom(newState.member, 'private');
         }
-        else if (newState.channelId === publicLobbyId) {
+        else if (joinedChannelId === publicLobbyId) {
+          // JOIN-TO-CREATE: spin up a public room.
           await roomManager.createRoom(newState.member, 'public');
+        }
+        else {
+          // KNOCK: if this is a tracked private room and they aren't a member,
+          // handleKnock bounces them to the waiting room and asks for approval.
+          // (Non-room channels are ignored inside handleKnock.)
+          await roomManager.handleKnock(newState.member, joinedChannelId);
         }
       }
 

@@ -1,12 +1,11 @@
 import { REST, Routes } from 'discord.js';
 import { loadConfig } from './config';
 import * as setup from './commands/setup';
-import * as requestAccess from './commands/requestAccess';
 
 (async () => {
   try {
     const config = loadConfig();
-    const commands = [setup.data.toJSON(), requestAccess.data.toJSON()];
+    const commands = [setup.data.toJSON()];
     const rest = new REST({ version: '10' }).setToken(config.token);
 
     console.log(`[deploy-commands] Registering ${commands.length} slash command(s)…`);
