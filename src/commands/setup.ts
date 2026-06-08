@@ -83,12 +83,11 @@ export async function execute(
     });
 
     // Knock panel: a text channel everyone can see but not post in (bot only).
-    // Outsiders request access to a private room here by right-clicking a room
-    // card → Apps → Request Access; they can't reach a private voice channel's
-    // own chat, so the knock lives here. UseApplicationCommands is granted to
-    // @everyone explicitly so the context-menu command works even when the
-    // guild/category default denies it for non-admins (admins bypass overwrites,
-    // which is why the command otherwise appears "admins only").
+    // Outsiders request access to a private room here by clicking the room card's
+    // "Request Access" button. Buttons need no special permission — anyone who can
+    // see the message can click — which is why this replaces the old context-menu
+    // command that effectively only worked for admins. @everyone keeps ViewChannel
+    // + ReadMessageHistory so the cards and their buttons are always visible.
     const knockChannel = await guild.channels.create({
       name: DEFAULTS.knockChannelName,
       type: ChannelType.GuildText,
@@ -96,11 +95,7 @@ export async function execute(
       permissionOverwrites: [
         {
           id: guild.roles.everyone.id,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.ReadMessageHistory,
-            PermissionFlagsBits.UseApplicationCommands,
-          ],
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
           deny: [PermissionFlagsBits.SendMessages],
         },
         {
@@ -115,8 +110,8 @@ export async function execute(
         content:
           '🔒 **Private rooms**\n' +
           'You can see private rooms but not join them directly. Each active private room ' +
-          'gets its own message below — **right-click it → Apps → Request Access** to ask to ' +
-          'join, and a member inside will approve you (they\'ll hear a knock).',
+          'gets its own card below — click its **Request Access** button to ask to join. ' +
+          'The people inside will hear a knock and can let you in.',
       })
       .catch(() => {});
 

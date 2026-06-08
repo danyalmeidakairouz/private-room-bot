@@ -64,15 +64,11 @@ export const DEFAULTS = {
   categoryName: 'Voice Rooms',
 } as const;
 
-// customId prefixes for the approval buttons posted in a private room's chat.
-//   `${approve}:${channelId}:${userId}`  — a member approves the requester
-//   `${deny}:${channelId}:${userId}`     — a member denies the requester
-// customIds are capped at 100 chars — two snowflakes fit easily.
+// customId prefixes for the request/approval buttons.
+//   `${request}:${channelId}`            — an outsider knocks from the request-to-join panel
+//   `${allow}:${channelId}:${userId}`    — a member in the room lets the requester in
+// customIds are capped at 100 chars — a prefix plus two snowflakes fits easily.
 export const BUTTON_IDS = {
-  approve: 'room_apv',
-  deny: 'room_dny',
+  request: 'room_req',
+  allow: 'room_alw',
 } as const;
-
-// Name of the "Request Access" message context-menu command (right-click a room
-// card → Apps → Request Access). Spaces/caps are allowed for context-menu commands.
-export const REQUEST_ACCESS_COMMAND = 'Request Access';
