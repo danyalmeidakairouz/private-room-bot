@@ -15,6 +15,7 @@ import {
 import { GuildConfigStore, type GuildConfig } from '../store/guildConfigStore';
 import { TempRoomStore, type RoomType, type TempRoom } from '../store/tempRoomStore';
 import { pickRoomName } from '../util/nameGenerator';
+import { resolveUniqueName } from '../util/roomNames';
 import { BUTTON_IDS, DEFAULTS } from '../constants';
 import { playKnock } from './knockSound';
 
@@ -30,6 +31,17 @@ export class RoomManager {
     this.client = client;
     this.guildConfig = guildConfig;
     this.tempRooms = tempRooms;
+  }
+
+  // Disambiguate a room name against the voice channels already in the target
+  // category so two rooms never share a name (Discord allows duplicates, but they
+  // are confusing). A private room's role reuses the returned name, keeping the
+  // channel and its role in sync.
+  private uniqueRoomName(guild: Guild, base: string, categoryId: string | null): string {
+    const taken = guild.channels.cache
+      .filter((ch) => ch.type === ChannelType.GuildVoice && (categoryId === null || ch.parentId === categoryId))
+      .map((ch) => ch.name);
+    return resolveUniqueName(base, taken);
   }
 
   static computeRolePosition(botHighestPosition: number, adminPosition: number | null): number {
@@ -98,7 +110,7 @@ export class RoomManager {
   // they knock via the Request-to-Join button and a member approves.
   private async createPrivateRoom(member: GuildMember, cfg: GuildConfig): Promise<void> {
     const guild = member.guild;
-    const name = pickRoomName(cfg.privateRoomNames);
+    const name = this.uniqueRoomName(guild, pickRoomName(cfg.privateRoomNames), cfg.categoryId);
 
     // Compute a safe role position below the bot's highest role and optionally below the admin role.
     const me = await guild.members.fetchMe();
@@ -281,7 +293,7 @@ export class RoomManager {
   // Public room: no role, no gating — anyone can join. Deleted when everyone leaves.
   private async createPublicRoom(member: GuildMember, cfg: GuildConfig): Promise<void> {
     const guild = member.guild;
-    const name = pickRoomName(cfg.publicRoomNames);
+    const name = this.uniqueRoomName(guild, pickRoomName(cfg.publicRoomNames), cfg.categoryId);
     const me = await guild.members.fetchMe();
 
     const channel = await guild.channels.create({
