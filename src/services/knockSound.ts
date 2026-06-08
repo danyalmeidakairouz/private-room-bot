@@ -55,12 +55,6 @@ export async function playKnock(channel: VoiceBasedChannel): Promise<void> {
       adapterCreator: channel.guild.voiceAdapterCreator,
       selfDeaf: true,
       selfMute: false,
-      // debug: true makes the connection emit 'debug' events for each handshake
-      // substage (Identify → UdpHandshaking → SelectingProtocol → Ready). When a
-      // knock fails to connect, these reveal exactly where it stalls — most often
-      // UdpHandshaking, which means the host can't complete Discord's UDP IP
-      // discovery (a voice/UDP networking problem, not a code one).
-      debug: true,
     });
     connection.on('error', (err) =>
       console.warn(`[knockSound] voice connection error in "${channel.name}":`, err.message),
@@ -82,7 +76,6 @@ export async function playKnock(channel: VoiceBasedChannel): Promise<void> {
         );
       }
     });
-    connection.on('debug', (message) => console.log('[knockSound][voice]', message));
 
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
