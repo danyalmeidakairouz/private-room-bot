@@ -27,15 +27,19 @@ gcloud compute instances create private-room-bot \
   --boot-disk-size=30GB --boot-disk-type=pd-standard
 ```
 
-## 2. SSH in and install Node 20
+## 2. SSH in and install Node 22
+
+Node 22 (LTS) or newer is required — `@discordjs/voice` (DAVE/E2EE voice) needs `node >= 22.12`.
 
 Use the **SSH** button in the console (or `gcloud compute ssh private-room-bot --zone=us-central1-a`), then:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs git
-node -v   # should print v20.x
+node -v   # should print v22.x
 ```
+
+Already on an older Node (e.g. v20)? Run the two commands above to upgrade in place, then from the repo: `rm -rf node_modules && ./update.sh`.
 
 ## 3. Get the code onto the VM
 

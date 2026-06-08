@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: compile TypeScript to dist/ ----
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 # Install ALL deps (incl. dev) for the build.
@@ -14,7 +14,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- Runtime stage: production deps + compiled output only ----
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 # Config dir for the JSON state (guild-config.json, temp-rooms.json).
 ENV DATA_DIR=/app/data
