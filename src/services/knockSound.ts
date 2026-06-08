@@ -65,9 +65,23 @@ export async function playKnock(channel: VoiceBasedChannel): Promise<void> {
     connection.on('error', (err) =>
       console.warn(`[knockSound] voice connection error in "${channel.name}":`, err.message),
     );
-    connection.on('stateChange', (oldState, newState) =>
-      console.log(`[knockSound] connection: ${oldState.status} → ${newState.status}`),
-    );
+    // @discordjs/voice does not log the raw voice-WS close code, yet that code is
+    // what distinguishes the causes when the handshake fails: 4006 = session
+    // rejected, 1006 = network drop, 400x = gateway/version reject. Hook the
+    // networking instance (which lives on the Connecting/Ready states) to surface
+    // it. A WeakSet avoids attaching the listener twice to the same instance.
+    const closeHooked = new WeakSet<object>();
+    connection.on('stateChange', (oldState, newState) => {
+      console.log(`[knockSound] connection: ${oldState.status} → ${newState.status}`);
+      const networking = (newState as { networking?: object }).networking;
+      if (networking && !closeHooked.has(networking)) {
+        closeHooked.add(networking);
+        (networking as { on(event: 'close', listener: (code: number) => void): void }).on(
+          'close',
+          (code) => console.log(`[knockSound] voice WebSocket closed with code ${code}`),
+        );
+      }
+    });
     connection.on('debug', (message) => console.log('[knockSound][voice]', message));
 
     try {
