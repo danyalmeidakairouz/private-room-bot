@@ -10,36 +10,13 @@ import {
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { DEFAULTS } from '../constants';
 
-// Hard caps so a pasted blob can't produce an over-long channel name or an
-// unbounded candidate list.
-const MAX_ROOM_NAME_LEN = 100; // Discord's channel-name character limit.
-const MAX_ROOM_NAME_LIST = 50;
-
-/**
- * Parse an admin-entered list of room names (separated by commas, semicolons, or
- * newlines) into a clean array. Returns undefined when the option was omitted
- * (raw is null) so the caller can carry the previously-saved list forward;
- * returns an array (possibly empty) when the admin supplied text, so supplying
- * blank/garbage text clears the list back to the random default.
- *
- * @param raw The raw option value, or null when the option was not provided.
- * @return The parsed names, or undefined when the option was omitted.
- */
-function parseRoomNames(raw: string | null): string[] | undefined {
-  if (raw === null) {
-    return undefined;
-  }
-  return raw
-    .split(/[,;\n]/)
-    .map((n) => n.trim().slice(0, MAX_ROOM_NAME_LEN))
-    .filter((n) => n.length > 0)
-    .slice(0, MAX_ROOM_NAME_LIST);
-}
-
+// Access is intentionally NOT gated by setDefaultMemberPermissions — it is
+// governed entirely by Discord's command-permissions UI (Server Settings →
+// Integrations), i.e. the server's own role-management system. Room-name lists
+// are managed by the /public-channels-names and /private-channels-names commands.
 export const data: SlashCommandBuilder = new SlashCommandBuilder()
   .setName('setup')
   .setDescription('Set up the Join-to-Create lobby for temporary private voice rooms')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setContexts(InteractionContextType.Guild)
   .addRoleOption((o) =>
     o
@@ -54,22 +31,6 @@ export const data: SlashCommandBuilder = new SlashCommandBuilder()
       .setName('category')
       .setDescription('Category to create rooms under')
       .addChannelTypes(ChannelType.GuildCategory)
-      .setRequired(false),
-  )
-  .addStringOption((o) =>
-    o
-      .setName('public_names')
-      .setDescription(
-        'Comma-separated names for new public rooms; a random one is used per room (blank = random)',
-      )
-      .setRequired(false),
-  )
-  .addStringOption((o) =>
-    o
-      .setName('private_names')
-      .setDescription(
-        'Comma-separated names for new private rooms; a random one is used per room (blank = random)',
-      )
       .setRequired(false),
   ) as SlashCommandBuilder;
 
@@ -94,13 +55,11 @@ export async function execute(
     const adminRole = interaction.options.getRole('admin_role');
     const category = interaction.options.getChannel('category') as CategoryChannel | null;
 
-    // Parse the optional name lists. When an option is omitted we keep whatever
-    // was configured before, so re-running /setup for another reason never wipes
-    // an admin's curated lists.
-    const publicRoomNames =
-      parseRoomNames(interaction.options.getString('public_names')) ?? oldCfg?.publicRoomNames;
-    const privateRoomNames =
-      parseRoomNames(interaction.options.getString('private_names')) ?? oldCfg?.privateRoomNames;
+    // Room-name lists are managed by /public-channels-names and
+    // /private-channels-names; carry them forward so re-running /setup never
+    // wipes an admin's curated lists.
+    const publicRoomNames = oldCfg?.publicRoomNames;
+    const privateRoomNames = oldCfg?.privateRoomNames;
 
     let resolvedCategoryId: string;
     let categoryMention: string;
