@@ -3,13 +3,13 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
   type ButtonInteraction,
   type Client,
   type Guild,
   type GuildMember,
-  type MessageContextMenuCommandInteraction,
   type VoiceChannel,
 } from 'discord.js';
 import { GuildConfigStore, type GuildConfig } from '../store/guildConfigStore';
@@ -221,15 +221,30 @@ export class RoomManager {
       .createInvite({ maxAge: DEFAULTS.inviteMaxAgeSec, maxUses: 0 })
       .catch(() => null);
 
-    // Post a "card" for this room in the knock channel. Outsiders right-click it
-    // (Apps → Request Access) to knock; the card's message id links back to this room.
+    // Post a "card" for this room in the knock channel: an embed naming the room
+    // plus a "Request Access" button anyone who can see the channel may click
+    // (buttons need no special permission, unlike the old context-menu command).
+    // The button's customId carries this channel's id so the knock routes straight
+    // back here; the card's message id is stored so cleanup can delete it.
     if (cfg.knockChannelId) {
       const knockCh = await guild.channels.fetch(cfg.knockChannelId).catch(() => null);
       if (knockCh?.isTextBased()) {
+        const cardEmbed = new EmbedBuilder()
+          .setColor(0xed4245)
+          .setTitle(`🔒 ${name}`)
+          .setDescription(
+            'A private voice room. Click **Request Access** to ask to join — the people ' +
+              'inside will hear a knock and can let you in.',
+          );
+        const cardRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${BUTTON_IDS.request}:${channel.id}`)
+            .setLabel('Request Access')
+            .setEmoji('🚪')
+            .setStyle(ButtonStyle.Primary),
+        );
         const card = await knockCh
-          .send({
-            content: `🔒 **${name}** — right-click this message → **Apps → Request Access** to ask to join.`,
-          })
+          .send({ embeds: [cardEmbed], components: [cardRow] })
           .catch(() => null);
         if (card) {
           roomRecord.cardMessageId = card.id;
@@ -254,7 +269,7 @@ export class RoomManager {
     const channelMessage =
       `🔒 Welcome to your private room **${name}**!\n` +
       `• Members can drag friends in or share this invite: ${invite?.url ?? '(invite unavailable)'}\n` +
-      `• Outsiders request access from the **🚪 request-to-join** channel — you'll get an Approve/Deny prompt right here.`;
+      `• Outsiders request access from the **🚪 request-to-join** channel — you'll get an **Allow In** prompt right here.`;
     await channel.send({ content: channelMessage }).catch(() => {});
 
     // DM the owner the shareable invite.
@@ -331,16 +346,17 @@ export class RoomManager {
       .catch(() => {});
   }
 
-  // Routes the Approve/Deny buttons posted in a private room's chat.
-  //   `${approve}:${channelId}:${userId}` / `${deny}:${channelId}:${userId}`
+  // Routes the room buttons.
+  //   `${request}:${channelId}`           — outsider knocks from the request-to-join panel
+  //   `${allow}:${channelId}:${userId}`   — a member in the room lets the requester in
   async handleButton(interaction: ButtonInteraction): Promise<void> {
-    const [action, channelId, userId] = interaction.customId.split(':');
+    const [action, channelId, requesterId] = interaction.customId.split(':');
     switch (action) {
-      case BUTTON_IDS.approve:
-        await this.handleApproval(interaction, channelId, userId, true);
+      case BUTTON_IDS.request:
+        await this.handleRequestButton(interaction, channelId);
         break;
-      case BUTTON_IDS.deny:
-        await this.handleApproval(interaction, channelId, userId, false);
+      case BUTTON_IDS.allow:
+        await this.handleAllow(interaction, channelId, requesterId);
         break;
       default:
         // Unreachable in practice (interactionCreate only routes known prefixes),
@@ -350,10 +366,10 @@ export class RoomManager {
     }
   }
 
-  // "Request Access" message context-menu command: right-click a room's card in the
-  // knock channel → Apps → Request Access. Posts an Approve/Deny prompt into the
-  // room's chat and plays a knock sound the members inside can hear.
-  async handleRequestAccess(interaction: MessageContextMenuCommandInteraction): Promise<void> {
+  // "Request Access" button under a room's card in the request-to-join panel. Plays
+  // a knock the people inside can hear and drops an "Allow In" prompt — carrying the
+  // requester's name and avatar — into the room's own text chat.
+  async handleRequestButton(interaction: ButtonInteraction, channelId: string): Promise<void> {
     // Defer immediately — the work below does several round-trips and would
     // otherwise risk blowing Discord's 3s interaction-ack window.
     await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -364,27 +380,25 @@ export class RoomManager {
       return;
     }
 
-    // Map the right-clicked message back to a room via its stored card id.
-    const room = this.tempRooms
-      .byGuild(guild.id)
-      .find((r) => r.cardMessageId === interaction.targetId && r.type === 'private' && r.roleId);
-    if (!room || !room.roleId) {
-      await interaction
-        .editReply(
-          'Right-click one of the room cards in the request-to-join channel and choose **Apps → Request Access**.',
-        )
-        .catch(() => {});
+    // The button's customId carries the room's channel id, so route straight to it.
+    const room = this.tempRooms.get(channelId);
+    if (!room || room.guildId !== guild.id || room.type !== 'private' || !room.roleId) {
+      await interaction.editReply('That room is no longer available.').catch(() => {});
       return;
     }
 
-    const channel = await guild.channels.fetch(room.channelId).catch(() => null);
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isVoiceBased()) {
       await interaction.editReply('That room no longer exists.').catch(() => {});
       return;
     }
 
     const requester = await guild.members.fetch(interaction.user.id).catch(() => null);
-    if (requester?.roles.cache.has(room.roleId)) {
+    if (!requester) {
+      await interaction.editReply('Could not verify your membership — please try again.').catch(() => {});
+      return;
+    }
+    if (requester.roles.cache.has(room.roleId)) {
       await interaction
         .editReply(`You already have access to **${channel.name}** — just click it to join.`)
         .catch(() => {});
@@ -394,37 +408,41 @@ export class RoomManager {
     if (channel.members.size === 0) {
       await interaction
         .editReply(
-          `Nobody is in **${channel.name}** right now to approve your request. Try again when someone's there.`,
+          `Nobody is in **${channel.name}** right now to let you in. Try again when someone's there.`,
         )
         .catch(() => {});
       return;
     }
 
-    const approveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const allowRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(`${BUTTON_IDS.approve}:${room.channelId}:${interaction.user.id}`)
-        .setLabel('Approve')
+        .setCustomId(`${BUTTON_IDS.allow}:${channel.id}:${requester.id}`)
+        .setLabel('Allow In')
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`${BUTTON_IDS.deny}:${room.channelId}:${interaction.user.id}`)
-        .setLabel('Deny')
-        .setEmoji('✖️')
-        .setStyle(ButtonStyle.Danger),
     );
+
+    const knockEmbed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setAuthor({
+        name: `${requester.displayName} wants to join`,
+        iconURL: requester.displayAvatarURL(),
+      })
+      .setThumbnail(requester.displayAvatarURL())
+      .setDescription(
+        `<@${requester.id}> is asking to join **${channel.name}**. ` +
+          'Anyone currently in the room can let them in.',
+      );
 
     // Ping the owner only if they're actually in the room, so we don't alert
     // someone who has left (the record outlives their presence until cleanup).
     const ownerInRoom = channel.members.has(room.ownerId);
-    const ownerPing = ownerInRoom ? ` <@${room.ownerId}>` : '';
-    const mentionUsers = ownerInRoom ? [interaction.user.id, room.ownerId] : [interaction.user.id];
     const sent = await channel
       .send({
-        content:
-          `🔔 <@${interaction.user.id}> would like to join **${channel.name}**. ` +
-          `Any member currently in the room can approve.${ownerPing}`,
-        components: [approveRow],
-        allowedMentions: { users: mentionUsers },
+        content: ownerInRoom ? `<@${room.ownerId}>` : undefined,
+        embeds: [knockEmbed],
+        components: [allowRow],
+        allowedMentions: { users: ownerInRoom ? [room.ownerId] : [] },
       })
       .catch(() => null);
 
@@ -436,7 +454,7 @@ export class RoomManager {
     }
 
     await interaction
-      .editReply(`✅ Your request to join **${channel.name}** was sent — a member there can approve you.`)
+      .editReply(`✅ Your request to join **${channel.name}** was sent — a member there can let you in.`)
       .catch(() => {});
 
     // Play the knock sound so the people inside hear it. Fire-and-forget: joining,
@@ -444,18 +462,18 @@ export class RoomManager {
     void playKnock(channel);
   }
 
-  // A member pressed Approve/Deny on a knock. Only people currently in the room may decide.
-  private async handleApproval(
+  // A member pressed "Allow In". Only someone currently connected to the room may
+  // let the requester in; we grant the room role and move them straight into the channel.
+  private async handleAllow(
     interaction: ButtonInteraction,
     channelId: string,
     requesterId: string,
-    approved: boolean,
   ): Promise<void> {
     const guild = interaction.guild;
     const room = this.tempRooms.get(channelId);
     if (!guild || !room || !room.roleId || room.guildId !== guild.id) {
       await interaction
-        .update({ content: 'This room is no longer available.', components: [] })
+        .update({ content: 'This room is no longer available.', embeds: [], components: [] })
         .catch(() => {});
       return;
     }
@@ -463,27 +481,18 @@ export class RoomManager {
     const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isVoiceBased()) {
       await interaction
-        .update({ content: 'This room no longer exists.', components: [] })
+        .update({ content: 'This room no longer exists.', embeds: [], components: [] })
         .catch(() => {});
       return;
     }
 
-    // Only people currently connected to the room may approve or deny.
+    // Only people currently connected to the room may let someone in. Outsiders can
+    // see this voice channel's text chat, so the connection check is the real gate.
     if (!channel.members.has(interaction.user.id)) {
       await interaction
         .reply({
-          content: 'Only members currently in the room can approve or deny requests.',
+          content: 'Only members currently in the room can let people in.',
           flags: MessageFlags.Ephemeral,
-        })
-        .catch(() => {});
-      return;
-    }
-
-    if (!approved) {
-      await interaction
-        .update({
-          content: `✖️ Request from <@${requesterId}> was denied by <@${interaction.user.id}>.`,
-          components: [],
         })
         .catch(() => {});
       return;
@@ -492,7 +501,11 @@ export class RoomManager {
     const requester = await guild.members.fetch(requesterId).catch(() => null);
     if (!requester) {
       await interaction
-        .update({ content: 'The requester is no longer in this server.', components: [] })
+        .update({
+          content: 'The requester is no longer in this server.',
+          embeds: [],
+          components: [],
+        })
         .catch(() => {});
       return;
     }
@@ -501,20 +514,33 @@ export class RoomManager {
       .add(room.roleId)
       .catch(() => console.warn(`[RoomManager] Could not grant role ${room.roleId} to ${requesterId}.`));
 
-    // If the requester is connected to a *different* voice channel, pull them into
-    // the room; otherwise the role now lets them join on their own.
-    if (requester.voice.channelId && requester.voice.channelId !== channel.id) {
-      await requester.voice.setChannel(channel.id).catch(() => {});
+    // Discord only lets us move a member who is already connected to some voice
+    // channel. If they're connected elsewhere, pull them in; if they're already
+    // here, nothing to do; if they're not in voice at all, the role lets them click in.
+    let moved = false;
+    if (requester.voice.channelId === channel.id) {
+      moved = true;
+    }
+    else if (requester.voice.channelId) {
+      moved = await requester.voice
+        .setChannel(channel.id)
+        .then(() => true)
+        .catch(() => false);
     }
 
-    // Best-effort DM so a requester who isn't watching the channel knows they're in.
+    // Best-effort DM so a requester who isn't watching the channel knows the outcome.
     await requester
-      .send(`✅ You've been approved to join **${channel.name}**.`)
+      .send(
+        moved
+          ? `✅ You've been let into **${channel.name}**.`
+          : `✅ You've been approved for **${channel.name}** — click it to join.`,
+      )
       .catch(() => {});
 
     await interaction
       .update({
-        content: `✅ <@${requesterId}> was approved by <@${interaction.user.id}> and can now join.`,
+        content: `✅ <@${requesterId}> was let into **${channel.name}** by <@${interaction.user.id}>.`,
+        embeds: [],
         components: [],
       })
       .catch(() => {});
