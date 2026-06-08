@@ -24,7 +24,7 @@ export class RoomManager {
   private readonly tempRooms: TempRoomStore;
   private readonly creating = new Set<string>();
   private readonly pendingCleanup = new Set<string>();
-  private sweeper: NodeJS.Timeout | null = null;
+  private sweeper: ReturnType<typeof setInterval> | null = null;
 
   constructor(client: Client, guildConfig: GuildConfigStore, tempRooms: TempRoomStore) {
     this.client = client;
