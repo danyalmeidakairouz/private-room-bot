@@ -14,7 +14,7 @@ import {
 } from 'discord.js';
 import { GuildConfigStore, type GuildConfig } from '../store/guildConfigStore';
 import { TempRoomStore, type RoomType, type TempRoom } from '../store/tempRoomStore';
-import { generateRoomName } from '../util/nameGenerator';
+import { pickRoomName } from '../util/nameGenerator';
 import { BUTTON_IDS, DEFAULTS } from '../constants';
 import { playKnock } from './knockSound';
 
@@ -98,7 +98,7 @@ export class RoomManager {
   // they knock via the Request-to-Join button and a member approves.
   private async createPrivateRoom(member: GuildMember, cfg: GuildConfig): Promise<void> {
     const guild = member.guild;
-    const name = generateRoomName();
+    const name = pickRoomName(cfg.privateRoomNames);
 
     // Compute a safe role position below the bot's highest role and optionally below the admin role.
     const me = await guild.members.fetchMe();
@@ -281,7 +281,7 @@ export class RoomManager {
   // Public room: no role, no gating — anyone can join. Deleted when everyone leaves.
   private async createPublicRoom(member: GuildMember, cfg: GuildConfig): Promise<void> {
     const guild = member.guild;
-    const name = generateRoomName();
+    const name = pickRoomName(cfg.publicRoomNames);
     const me = await guild.members.fetchMe();
 
     const channel = await guild.channels.create({

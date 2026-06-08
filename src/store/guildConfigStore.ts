@@ -13,6 +13,16 @@ export interface GuildConfig {
   categoryId: string | null;
   adminRoleId: string | null;
   /**
+   * Candidate names for new public rooms. On creation one is picked at random;
+   * when absent or empty the bot falls back to the generated animal name.
+   */
+  publicRoomNames?: string[];
+  /**
+   * Candidate names for new private rooms. On creation one is picked at random;
+   * when absent or empty the bot falls back to the generated animal name.
+   */
+  privateRoomNames?: string[];
+  /**
    * @deprecated Legacy single-lobby field from the pre-public-rooms config.
    * Read as the private lobby when {@link privateLobbyChannelId} is absent so
    * already-deployed guilds keep working until `/setup` is re-run.
