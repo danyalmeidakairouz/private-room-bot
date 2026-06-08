@@ -9,17 +9,17 @@ import {
 } from 'discord.js';
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { DEFAULTS } from '../constants';
+import { memberOutranksBot, OUTRANK_DENIED_MESSAGE } from '../util/permissions';
 
-// Default to admin-only (default_member_permissions = 0): out of the box only
-// members with Administrator can use it, and admins grant access to specific
-// roles via Discord's command-permissions UI (Server Settings → Integrations) —
-// the server's own role-management system. We deliberately do NOT pin a specific
-// named permission (e.g. Manage Server) so access isn't hardcoded to one role.
-// Room-name lists are managed by /public-channels-names and /private-channels-names.
+// Visible to everyone, but access is enforced at runtime (see memberOutranksBot):
+// only the server owner, members with the Administrator permission, or members
+// whose highest role sits above the bot's role may run it. Discord cannot gate a
+// command by role position natively, so this lives in code rather than in
+// default_member_permissions. Room-name lists are managed by the
+// /public-channels-names and /private-channels-names commands.
 export const data: SlashCommandBuilder = new SlashCommandBuilder()
   .setName('setup')
   .setDescription('Set up the Join-to-Create lobby for temporary private voice rooms')
-  .setDefaultMemberPermissions('0')
   .setContexts(InteractionContextType.Guild)
   .addRoleOption((o) =>
     o
@@ -49,6 +49,11 @@ export async function execute(
   }
 
   const guild = interaction.guild;
+
+  if (!(await memberOutranksBot(interaction))) {
+    await interaction.editReply(OUTRANK_DENIED_MESSAGE);
+    return;
+  }
 
   try {
     // Snapshot any prior config so we can tear down the channels the last /setup

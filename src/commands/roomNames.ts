@@ -6,12 +6,15 @@ import {
 } from 'discord.js';
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { parseRoomNames } from '../util/roomNames';
+import { memberOutranksBot, OUTRANK_DENIED_MESSAGE } from '../util/permissions';
 
 // These commands let a server admin curate the pool of names that new public /
-// private voice rooms are randomly given. They default to admin-only
-// (default_member_permissions = 0); admins grant access to specific roles via
-// Discord's command-permissions UI (Server Settings → Integrations) — the
-// server's own role-management system — rather than a hardcoded named permission.
+// private voice rooms are randomly given. They are visible to everyone, but
+// access is enforced at runtime: only the server owner, members with the
+// Administrator permission, or members whose highest role sits above the bot's
+// role may use them (see memberOutranksBot). Discord cannot gate a command by
+// role position natively, so this lives in code rather than in
+// default_member_permissions.
 
 type RoomNameType = 'public' | 'private';
 
@@ -23,7 +26,6 @@ function buildData(name: string, type: RoomNameType): SlashCommandBuilder {
   return new SlashCommandBuilder()
     .setName(name)
     .setDescription(`Set the names new ${type} voice rooms are randomly given`)
-    .setDefaultMemberPermissions('0')
     .setContexts(InteractionContextType.Guild)
     .addStringOption((o) =>
       o
@@ -44,6 +46,11 @@ async function executeRoomNames(
 
   if (!interaction.guild) {
     await interaction.editReply('This command must be used in a server.');
+    return;
+  }
+
+  if (!(await memberOutranksBot(interaction))) {
+    await interaction.editReply(OUTRANK_DENIED_MESSAGE);
     return;
   }
 
