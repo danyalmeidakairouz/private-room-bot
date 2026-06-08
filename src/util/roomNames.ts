@@ -21,3 +21,27 @@ export function parseRoomNames(raw: string): string[] {
     .filter((n) => n.length > 0)
     .slice(0, MAX_ROOM_NAME_LIST);
 }
+
+/**
+ * Make a room name unique against a set of already-used names by appending
+ * ` - 2`, ` - 3`, … to the first free slot. The base name is used as-is when it
+ * doesn't collide. The result is always kept within the channel-name length
+ * limit (the base is trimmed to make room for the suffix when needed).
+ *
+ * @param base The desired room name.
+ * @param taken The names already in use (e.g. existing channels in the category).
+ * @return A name not present in `taken`.
+ */
+export function resolveUniqueName(base: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let n = 2; ; n++) {
+    const suffix = ` - ${n}`;
+    const candidate = base.slice(0, MAX_ROOM_NAME_LEN - suffix.length) + suffix;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+}
