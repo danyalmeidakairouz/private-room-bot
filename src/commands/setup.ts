@@ -83,8 +83,12 @@ export async function execute(
     });
 
     // Knock panel: a text channel everyone can see but not post in (bot only).
-    // Outsiders press the button here to request access to a private room — they
-    // can't reach a private voice channel's own chat, so the knock lives here.
+    // Outsiders request access to a private room here by right-clicking a room
+    // card → Apps → Request Access; they can't reach a private voice channel's
+    // own chat, so the knock lives here. UseApplicationCommands is granted to
+    // @everyone explicitly so the context-menu command works even when the
+    // guild/category default denies it for non-admins (admins bypass overwrites,
+    // which is why the command otherwise appears "admins only").
     const knockChannel = await guild.channels.create({
       name: DEFAULTS.knockChannelName,
       type: ChannelType.GuildText,
@@ -92,7 +96,11 @@ export async function execute(
       permissionOverwrites: [
         {
           id: guild.roles.everyone.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.UseApplicationCommands,
+          ],
           deny: [PermissionFlagsBits.SendMessages],
         },
         {
