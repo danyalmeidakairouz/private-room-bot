@@ -10,13 +10,16 @@ import {
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { DEFAULTS } from '../constants';
 
-// Access is intentionally NOT gated by setDefaultMemberPermissions — it is
-// governed entirely by Discord's command-permissions UI (Server Settings →
-// Integrations), i.e. the server's own role-management system. Room-name lists
-// are managed by the /public-channels-names and /private-channels-names commands.
+// Default to admin-only (default_member_permissions = 0): out of the box only
+// members with Administrator can use it, and admins grant access to specific
+// roles via Discord's command-permissions UI (Server Settings → Integrations) —
+// the server's own role-management system. We deliberately do NOT pin a specific
+// named permission (e.g. Manage Server) so access isn't hardcoded to one role.
+// Room-name lists are managed by /public-channels-names and /private-channels-names.
 export const data: SlashCommandBuilder = new SlashCommandBuilder()
   .setName('setup')
   .setDescription('Set up the Join-to-Create lobby for temporary private voice rooms')
+  .setDefaultMemberPermissions('0')
   .setContexts(InteractionContextType.Guild)
   .addRoleOption((o) =>
     o
