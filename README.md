@@ -24,7 +24,7 @@ A discord.js v14 bot that turns two "Join to Create" lobby voice channels into t
 
 ## Prerequisites
 
-- **Node.js 18+**
+- **Node.js 22+** (required — the voice library needs `node >= 22.12` for Discord's DAVE/E2EE voice protocol).
 - A **Discord application** with a bot token — create one at the [Discord Developer Portal](https://discord.com/developers/applications).
 
 ---
@@ -162,6 +162,20 @@ This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby ch
 
 > **Upgrading from the single-lobby version?** Re-run `/setup` to create the second lobby and refresh the stored config. Until you do, the old lobby keeps working as the private lobby.
 
+### Slash commands
+
+| Command | What it does |
+|---|---|
+| `/setup` | Creates the lobbies + request-to-join panel and stores config (options: `admin_role`, `category`). |
+| `/public-channels-names` | Sets the pool of names new **public** rooms are randomly given. |
+| `/private-channels-names` | Sets the pool of names new **private** rooms are randomly given. |
+
+For the two name commands: run with `names:"Lounge, Hangout, Chill Zone"` (comma / semicolon / newline separated, up to 50 names, 100 chars each) to **set** the list, with **no argument** to **view** the current list, or with **blank** text to **clear** it (rooms then fall back to random animal names like `Brave-Otter-7K2`). If two rooms would get the same name, the bot appends ` - 2`, ` - 3`, … so channels (and private-room roles) never collide.
+
+**Permissions:** none of these commands set a default permission. Access is enforced at runtime — only the **server owner**, members with **Administrator**, or members whose **highest role is above the bot's role** can run them. Grant/restrict further per role in **Server Settings → Integrations**.
+
+> **⚠️ Registering commands:** Adding or changing a command's *definition* (a new command, its options, or permissions) only reaches Discord after you run **`npm run deploy`**. `npm run dev`/`start` and `./update.sh` do **not** register commands — they only run the bot. So after pulling changes that touch commands, run `npm run deploy` once (guild-scoped + instant if `GUILD_ID` is set; global + up to ~1 h otherwise).
+
 ### Creating a public room
 
 1. Any member joins the **🔊 Join for Public** lobby.
@@ -178,14 +192,14 @@ This creates the **🔊 Join for Public** and **🔒 Join for Private** lobby ch
    - Posts a 24-hour invite link in the room's chat and DMs it to the member.
 3. Members drag friends in or share the invite. Anyone else requests access from the **🚪 request-to-join** channel (below).
 
-### Joining a private room (right-click → Request Access)
+### Joining a private room (Request Access → Allow In)
 
-1. Each active private room has a **card message** in the **🚪 request-to-join** channel.
-2. The outsider **right-clicks that card → Apps → Request Access**.
-3. The bot plays an audible **knock sound** inside the room and posts *"@user would like to join…"* with **Approve** / **Deny** buttons **into the room's chat** (pinging the owner if present). The requester gets a private "request sent" reply.
-4. Any member **currently in the room** presses **Approve** → the requester is granted the role, **auto-moved in** if they're connected to voice, and DMed — or **Deny** to reject.
+1. Each active private room posts a **card** in the **🚪 request-to-join** channel: an embed with the room's name and a **Request Access** button.
+2. The outsider clicks **Request Access** (a plain button — anyone who can see the channel can click; no special permission needed). They get a private "request sent" reply.
+3. The bot plays an audible **knock sound** inside the room and posts an embed into the **room's chat** with the requester's **name + avatar** and an **Allow In** button (pinging the owner if present).
+4. Any member **currently in the room** clicks **Allow In** → the requester is granted the role, **moved in** if they're connected to voice (otherwise the role lets them click in), and DMed.
 
-> **Why a card-and-context-menu and not the channel itself?** Discord doesn't let bots add anything to a *channel's* right-click menu, and it won't show a locked voice channel's *Text-in-Voice* chat to someone who lacks **Connect**. Bots *can* add a right-click action to a **message**, so each room gets a card you can right-click. The Approve/Deny prompt then goes to the room's chat, which the connected members can see, and the knock sound is played in the channel for them to hear.
+> **Why a button card and not the channel itself?** Discord doesn't let bots add actions to a *channel's* right-click menu, and it won't show a locked voice channel's *Text-in-Voice* chat to someone who lacks **Connect**. So each room gets a card with a button in the request-to-join channel. Buttons work for anyone who can see the message (unlike the old context-menu command, which Discord effectively gated to admins). The Allow In prompt goes to the room's chat — visible only to the connected members, who are also the only ones allowed to approve.
 
 ### Room deletion
 
@@ -280,9 +294,19 @@ persistent volume at `/app/data`.
 
 ### Slash commands are not appearing in Discord
 
-**Cause:** Global slash command registration can take up to 1 hour to propagate to all Discord servers.
+**Cause 1:** The commands were never registered, or you added/changed a command but didn't re-register. `./update.sh`, `npm run dev`, and `npm start` do **not** register commands.
 
-**Fix:** Set `GUILD_ID` in your `.env` file to your test server's ID. Guild-scoped commands register instantly. Remove `GUILD_ID` when deploying to production.
+**Fix:** Run **`npm run deploy`** once after any change to a command's definition (new command, options, permissions).
+
+**Cause 2:** Global registration can take up to 1 hour to propagate.
+
+**Fix:** Set `GUILD_ID` in your `.env` to your test server's ID — guild-scoped commands register instantly. Remove `GUILD_ID` for production (global).
+
+### No knock sound when someone requests access
+
+**Cause:** Discord enforces the **DAVE** end-to-end-encryption protocol for voice. A client that can't speak DAVE is rejected at the voice gateway with close code **4017** and no audio plays. This needs `@discordjs/voice` ≥ 0.19 + `@snazzah/davey` **and Node ≥ 22.12**.
+
+**Fix:** Make sure the host runs **Node 22+** (`node -v`) and dependencies are current (`npm install` then restart). Startup logs print a voice dependency report — confirm DAVE is listed. A `[knockSound] voice WebSocket closed with code 4017` line in the logs means the host is still on an old Node or missing `@snazzah/davey`.
 
 ### "Server Members Intent" error on startup
 
