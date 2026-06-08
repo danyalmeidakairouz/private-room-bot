@@ -10,6 +10,32 @@ import {
 import { GuildConfigStore } from '../store/guildConfigStore';
 import { DEFAULTS } from '../constants';
 
+// Hard caps so a pasted blob can't produce an over-long channel name or an
+// unbounded candidate list.
+const MAX_ROOM_NAME_LEN = 100; // Discord's channel-name character limit.
+const MAX_ROOM_NAME_LIST = 50;
+
+/**
+ * Parse an admin-entered list of room names (separated by commas, semicolons, or
+ * newlines) into a clean array. Returns undefined when the option was omitted
+ * (raw is null) so the caller can carry the previously-saved list forward;
+ * returns an array (possibly empty) when the admin supplied text, so supplying
+ * blank/garbage text clears the list back to the random default.
+ *
+ * @param raw The raw option value, or null when the option was not provided.
+ * @return The parsed names, or undefined when the option was omitted.
+ */
+function parseRoomNames(raw: string | null): string[] | undefined {
+  if (raw === null) {
+    return undefined;
+  }
+  return raw
+    .split(/[,;\n]/)
+    .map((n) => n.trim().slice(0, MAX_ROOM_NAME_LEN))
+    .filter((n) => n.length > 0)
+    .slice(0, MAX_ROOM_NAME_LIST);
+}
+
 export const data: SlashCommandBuilder = new SlashCommandBuilder()
   .setName('setup')
   .setDescription('Set up the Join-to-Create lobby for temporary private voice rooms')
@@ -28,6 +54,22 @@ export const data: SlashCommandBuilder = new SlashCommandBuilder()
       .setName('category')
       .setDescription('Category to create rooms under')
       .addChannelTypes(ChannelType.GuildCategory)
+      .setRequired(false),
+  )
+  .addStringOption((o) =>
+    o
+      .setName('public_names')
+      .setDescription(
+        'Comma-separated names for new public rooms; a random one is used per room (blank = random)',
+      )
+      .setRequired(false),
+  )
+  .addStringOption((o) =>
+    o
+      .setName('private_names')
+      .setDescription(
+        'Comma-separated names for new private rooms; a random one is used per room (blank = random)',
+      )
       .setRequired(false),
   ) as SlashCommandBuilder;
 
@@ -51,6 +93,14 @@ export async function execute(
 
     const adminRole = interaction.options.getRole('admin_role');
     const category = interaction.options.getChannel('category') as CategoryChannel | null;
+
+    // Parse the optional name lists. When an option is omitted we keep whatever
+    // was configured before, so re-running /setup for another reason never wipes
+    // an admin's curated lists.
+    const publicRoomNames =
+      parseRoomNames(interaction.options.getString('public_names')) ?? oldCfg?.publicRoomNames;
+    const privateRoomNames =
+      parseRoomNames(interaction.options.getString('private_names')) ?? oldCfg?.privateRoomNames;
 
     let resolvedCategoryId: string;
     let categoryMention: string;
@@ -122,6 +172,8 @@ export async function execute(
       knockChannelId: knockChannel.id,
       categoryId: resolvedCategoryId,
       adminRoleId: adminRole?.id ?? null,
+      publicRoomNames,
+      privateRoomNames,
     });
 
     // Best-effort: remove the previous run's bot-created lobby/knock channels so a
@@ -169,8 +221,15 @@ export async function execute(
       ? `\n• **Admin role:** <@&${adminRole.id}>`
       : '';
 
+    const describeNames = (list: string[] | undefined): string =>
+      list && list.length > 0
+        ? `${list.length} custom (${list.slice(0, 5).join(', ')}${list.length > 5 ? ', …' : ''})`
+        : 'random names';
+    const publicNamesPart = `\n• **Public room names:** ${describeNames(publicRoomNames)}`;
+    const privateNamesPart = `\n• **Private room names:** ${describeNames(privateRoomNames)}`;
+
     await interaction.editReply(
-      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Request to join:** <#${knockChannel.id}>\n• **Category:** ${categoryMention}${adminRolePart}${permWarning}${hierarchyWarning}`,
+      `✅ Setup complete!\n• **Join for Public:** <#${publicLobby.id}>\n• **Join for Private:** <#${privateLobby.id}>\n• **Request to join:** <#${knockChannel.id}>\n• **Category:** ${categoryMention}${adminRolePart}${publicNamesPart}${privateNamesPart}${permWarning}${hierarchyWarning}`,
     );
   }
   catch (err) {
