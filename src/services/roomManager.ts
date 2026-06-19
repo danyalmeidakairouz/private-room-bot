@@ -67,14 +67,36 @@ export class RoomManager {
         `[RoomManager] ${type} lobby join detected — creating a room for ${member.user.tag}.`,
       );
 
-      // Clean up any now-empty room this member still owns. This is what lets you
-      // hop straight from your own room into a lobby: the old room is empty the
-      // instant you leave it, so we delete it and free the per-owner slot instead
-      // of refusing to create the new one (the original move-into-lobby bug).
+      // Reconcile every room this member still owns before enforcing the per-owner
+      // cap. Leaving your own room frees you to open a new one:
+      //   - if the old room is gone or now empty, delete it (this is what lets you
+      //     hop straight from your own room into a lobby — the original
+      //     move-into-lobby bug);
+      //   - if you have already left it but others are still inside, hand the room
+      //     to one of them so it lives on and your per-owner slot is released —
+      //     otherwise the cap below would refuse your new room and strand you in
+      //     the lobby.
       for (const owned of this.tempRooms.byGuild(guild.id).filter((r) => r.ownerId === member.id)) {
         const ownedCh = await guild.channels.fetch(owned.channelId).catch(() => null);
-        if (!ownedCh || (ownedCh.isVoiceBased() && ownedCh.members.size === 0)) {
+        if (!ownedCh || !ownedCh.isVoiceBased() || ownedCh.members.size === 0) {
           await this.destroyRoom(owned.channelId, guild);
+          continue;
+        }
+        // Owner is creating a new room while still credited with this one. If they
+        // are no longer in it, transfer ownership to a member still inside so the
+        // cap stops blocking them. If they are still in it, leave the cap to reject
+        // the new room (deleting it would strand the people still connected).
+        if (!ownedCh.members.has(member.id)) {
+          const heir = ownedCh.members.find((m) => !m.user.bot);
+          if (heir) {
+            this.tempRooms.add({ ...owned, ownerId: heir.id });
+            console.log(
+              `[RoomManager] ${member.user.tag} left room ${owned.channelId} — transferred ownership to ${heir.user.tag}.`,
+            );
+          } else {
+            // Only bots remain — nothing to hand the room to, so reap it.
+            await this.destroyRoom(owned.channelId, guild);
+          }
         }
       }
 
